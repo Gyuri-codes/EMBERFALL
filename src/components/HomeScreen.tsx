@@ -28,13 +28,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     if (!ctx) return;
 
     let animId: number;
-    let width = (canvas.width = canvas.offsetWidth);
-    let height = (canvas.height = canvas.offsetHeight);
+    let width = (canvas.width = Math.max(canvas.offsetWidth || window.innerWidth || 800, 300));
+    let height = (canvas.height = Math.max(canvas.offsetHeight || window.innerHeight || 600, 300));
 
     const handleResize = () => {
       if (!canvas) return;
-      width = canvas.width = canvas.offsetWidth;
-      height = canvas.height = canvas.offsetHeight;
+      width = canvas.width = Math.max(canvas.offsetWidth || window.innerWidth || 800, 300);
+      height = canvas.height = Math.max(canvas.offsetHeight || window.innerHeight || 600, 300);
     };
     window.addEventListener('resize', handleResize);
 

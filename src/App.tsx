@@ -36,13 +36,21 @@ export default function App() {
 
   // Synchronize audio and accessibility settings with DOM & audio engine
   useEffect(() => {
+    // Unlock browser Web Audio API on first user touch/click/keypress
+    const unlockAudio = () => {
+      soundEngine.init();
+      soundEngine.resume();
+    };
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
+
     soundEngine.setVolume(saveState.settings.musicVolume, saveState.settings.sfxVolume);
     if (saveState.settings.audioMuted) {
       soundEngine.toggleMute();
     }
 
     // High contrast mode attribute
-    if (saveState.settings.highContrastMode) {
+    if (saveState.settings.highContrastMode || saveState.settings.highContrast) {
       document.documentElement.classList.add('high-contrast');
     } else {
       document.documentElement.classList.remove('high-contrast');
@@ -51,6 +59,11 @@ export default function App() {
     // Font size scaling
     document.documentElement.classList.remove('text-size-normal', 'text-size-large', 'text-size-xlarge');
     document.documentElement.classList.add(`text-size-${saveState.settings.fontSize}`);
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
   }, []);
 
   // Save whenever saveState changes

@@ -34,9 +34,15 @@ class SoundEngine {
   ];
 
   public init() {
-    if (this.isInitialized && this.ctx) return;
+    if (this.isInitialized && this.ctx) {
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      return;
+    }
     try {
       const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtxClass) return;
       this.ctx = new AudioCtxClass();
       
       this.masterGain = this.ctx.createGain();
@@ -53,7 +59,7 @@ class SoundEngine {
 
       this.isInitialized = true;
       if (this.ctx.state === 'suspended') {
-        this.ctx.resume();
+        this.ctx.resume().catch(() => {});
       }
     } catch {
       // Audio might fail in unsupported environments
@@ -61,9 +67,22 @@ class SoundEngine {
   }
 
   public resume() {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    if (!this.isInitialized || !this.ctx) {
+      this.init();
     }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  public ensureContext(): boolean {
+    if (!this.isInitialized || !this.ctx) {
+      this.init();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    return Boolean(this.ctx && this.sfxGain);
   }
 
   public setVolumes(master: number, music: number, sfx: number, musicEnabled: boolean, sfxEnabled: boolean) {

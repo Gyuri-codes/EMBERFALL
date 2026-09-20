@@ -3,6 +3,7 @@ import { INITIAL_LEADERBOARD } from '../data/store';
 import { LeaderboardEntry, GameSaveState } from '../types/game';
 import { ArrowLeft, Trophy, Medal, Swords, Flame, Sparkles, User, ShieldCheck, RefreshCw, Send } from 'lucide-react';
 import { soundEngine } from '../audio/soundEngine';
+import { safeApiFetch } from '../utils/api';
 
 interface LeaderboardScreenProps {
   saveState: GameSaveState;
@@ -51,7 +52,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   const fetchLeaderboard = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/leaderboard?category=${activeTab}`);
+      const res = await safeApiFetch(`/api/leaderboard?category=${activeTab}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.leaderboard)) {
         setServerEntries(data.leaderboard);
@@ -74,7 +75,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
     setIsSubmitting(true);
     setSubmitMessage(null);
     try {
-      const res = await fetch('/api/leaderboard', {
+      const res = await safeApiFetch('/api/leaderboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -108,7 +109,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
     setDuelResult(null);
 
     try {
-      const res = await fetch('/api/duel', {
+      const res = await safeApiFetch('/api/duel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

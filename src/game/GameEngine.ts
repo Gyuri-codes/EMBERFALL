@@ -164,6 +164,33 @@ export class GameEngine {
     return this.isPaused;
   }
 
+  public resetBattle() {
+    this.stop();
+    this.spiritEssence = 250;
+    this.celestialShardsEarned = 0;
+    this.coreHp = this.coreMaxHp;
+    this.totalKills = 0;
+    this.currentWave = 0;
+    this.isWaveActive = false;
+    this.waveSpawnQueue = [];
+    this.waveSpawnTimer = 0;
+    this.activeEnemies = [];
+    this.activeBoss = null;
+    this.projectiles = [];
+    this.particles = [];
+    this.floatingTexts = [];
+    this.placedGuardians.clear();
+    this.placementNodes = this.realm.placementNodes.map(n => ({ ...n }));
+    this.selectedNode = null;
+    this.callbacks.onEssenceChange(this.spiritEssence);
+    this.callbacks.onShardsChange(this.celestialShardsEarned);
+    this.callbacks.onCoreHpChange(this.coreHp, this.coreMaxHp);
+    this.callbacks.onWaveChange(this.currentWave, this.totalWaves, this.isWaveActive);
+    this.callbacks.onBossStateChange(null);
+    this.callbacks.onSelectedGuardianChange(null, null);
+    this.start();
+  }
+
   // --- WAVE SYSTEM ---
 
   public startNextWave() {
@@ -2075,14 +2102,14 @@ export class GameEngine {
 
   public handleResize = () => {
     const parent = this.canvas.parentElement;
-    if (!parent) return;
-    const w = parent.clientWidth;
-    const h = parent.clientHeight || 550;
+    const w = parent ? parent.clientWidth : window.innerWidth;
+    const h = (parent && parent.clientHeight) ? parent.clientHeight : 550;
+    if (w <= 0) return;
 
-    // Set canvas internal resolution to high DPI
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = w * dpr;
-    this.canvas.height = h * dpr;
+    // Set canvas internal resolution to crisp high DPI, capped at 2 to avoid memory bloat
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.floor(w * dpr);
+    this.canvas.height = Math.floor(h * dpr);
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
 
@@ -2160,7 +2187,16 @@ export class GameEngine {
   private handleWheel = (e: WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.05 : 0.95;
-    this.scale = Math.max(0.6, Math.min(2.0, this.scale * zoomFactor));
+    const newScale = Math.max(0.6, Math.min(2.0, this.scale * zoomFactor));
+    if (newScale !== this.scale) {
+      this.scale = newScale;
+      const parent = this.canvas.parentElement;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = (parent ? parent.clientWidth : window.innerWidth) * dpr;
+      const h = ((parent && parent.clientHeight) ? parent.clientHeight : 550) * dpr;
+      this.offsetX = (w - (this.VIRTUAL_WIDTH * this.scale)) / 2;
+      this.offsetY = (h - (this.VIRTUAL_HEIGHT * this.scale)) / 2;
+    }
   };
 
   private checkNodeClick(vx: number, vy: number) {

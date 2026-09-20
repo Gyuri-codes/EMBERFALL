@@ -246,6 +246,8 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    // Serve static files from both /EMBERFALL subpath and root to support any proxy/subpath configuration
+    app.use('/EMBERFALL', express.static(distPath));
     app.use(express.static(distPath));
     app.get('*', (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));

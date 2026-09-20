@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GameSettings, GameSaveState } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { saveManager } from '../utils/saveManager';
+import { safeApiFetch } from '../utils/api';
 import { X, Volume2, Monitor, Eye, Keyboard, Cloud, RotateCcw, Copy, Check, AlertTriangle, Sparkles, Map, Award, ShoppingBag } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -71,7 +72,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setCloudStatus(null);
     try {
       localStorage.setItem('emberfall_cultivator_id', cultivatorId);
-      const res = await fetch('/api/cloud-save', {
+      const res = await safeApiFetch('/api/cloud-save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -86,7 +87,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setCloudStatus(`Cloud sync failed: ${data.error}`);
       }
     } catch {
-      setCloudStatus('Cloud sync service temporarily offline (local save active).');
+      setCloudStatus('Cloud sync service offline on static deployment (local save active).');
     } finally {
       setIsCloudLoading(false);
     }
@@ -96,7 +97,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsCloudLoading(true);
     setCloudStatus(null);
     try {
-      const res = await fetch(`/api/cloud-save/${encodeURIComponent(cultivatorId)}`);
+      const res = await safeApiFetch(`/api/cloud-save/${encodeURIComponent(cultivatorId)}`);
       const data = await res.json();
       if (data.success && data.saveState) {
         onRestoreSave(data.saveState);
@@ -105,7 +106,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setCloudStatus(data.error || 'No saved profile found for this ID.');
       }
     } catch {
-      setCloudStatus('Could not reach cloud server.');
+      setCloudStatus('Could not reach cloud server (using local save data).');
     } finally {
       setIsCloudLoading(false);
     }

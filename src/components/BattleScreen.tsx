@@ -140,6 +140,15 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
     engineRef.current = engine;
     engine.start();
 
+    // Responsive high-DPI canvas resizing
+    let resizeObserver: ResizeObserver | null = null;
+    if (canvas.parentElement && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        engine.handleResize();
+      });
+      resizeObserver.observe(canvas.parentElement);
+    }
+
     // Poll ability cooldowns for UI
     const cdInterval = setInterval(() => {
       const cds: Record<string, number> = {};
@@ -184,6 +193,9 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
     return () => {
       clearInterval(cdInterval);
       window.removeEventListener('keydown', handleKeyDown);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       engine.destroy();
     };
   }, [realm]);
@@ -768,9 +780,7 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                 onClick={() => {
                   setDefeatData(null);
                   if (engineRef.current) {
-                    engineRef.current.coreHp = engineRef.current.coreMaxHp;
-                    engineRef.current.spiritEssence = 250;
-                    engineRef.current.start();
+                    engineRef.current.resetBattle();
                   }
                 }}
                 className="flex-1 py-2.5 rounded-xl font-cinzel font-bold text-xs sm:text-sm tracking-wider bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
