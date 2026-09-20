@@ -1,0 +1,6 @@
+{
+  "name": "EMBERFALL: GUARDIANS OF THE LAST REALM",
+  "description": "An epic Donghua-inspired Tower Defense web game featuring legendary cultivator guardians, elemental abilities, deep cultivation skill trees, and cinematic boss battles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
