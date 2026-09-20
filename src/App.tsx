@@ -262,8 +262,8 @@ export default function App() {
       {/* Accessible Live Region */}
       <ScreenReaderAnnouncer message={srMessage} />
 
-      {/* Global Navigation (Except in Full Battle Immersion Mode, can be accessed via HUD exit) */}
-      {currentScreen !== 'battle' && (
+      {/* Global Navigation (Except in Full Battle Immersion Mode and Home Screen which has integrated header) */}
+      {currentScreen !== 'battle' && currentScreen !== 'home' && (
         <Navbar
           currentScreen={currentScreen}
           onNavigate={(s) => {
@@ -286,6 +286,9 @@ export default function App() {
             onNavigate={(s) => setCurrentScreen(s)}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenTutorial={() => setIsTutorialOpen(true)}
+            saveState={saveState}
+            audioMuted={Boolean(saveState.settings.audioMuted)}
+            onToggleAudio={handleToggleAudio}
           />
         )}
 

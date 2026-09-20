@@ -2,8 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { REALMS_DATA } from '../data/realms';
 import { CHALLENGE_MODES } from '../data/store';
 import { GameMode, RealmData, ChallengeModifier, GameSaveState } from '../types/game';
-import { Flame, Compass, Snowflake, Zap, Skull, Shield, Swords, Play, Sparkles, AlertTriangle, ArrowLeft, Lock } from 'lucide-react';
+import { 
+  Flame, 
+  Compass, 
+  Snowflake, 
+  Zap, 
+  Skull, 
+  Shield, 
+  Swords, 
+  Play, 
+  Sparkles, 
+  AlertTriangle, 
+  ArrowLeft, 
+  Lock, 
+  RotateCw, 
+  Eye, 
+  Mountain 
+} from 'lucide-react';
 import { soundEngine } from '../audio/soundEngine';
+import { 
+  getBattlefieldComposition, 
+  BattlefieldComposition, 
+  REALM_BATTLEFIELD_VARIATIONS 
+} from '../data/battlefieldEnvironments';
+import { BattlefieldParticleCanvas } from './BattlefieldParticleCanvas';
 
 interface RealmSelectScreenProps {
   onSelectRealm: (realm: RealmData, mode: GameMode, challenge?: ChallengeModifier) => void;
@@ -19,6 +41,37 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
   const [selectedRealm, setSelectedRealm] = useState<RealmData>(REALMS_DATA[0]);
   const [selectedMode, setSelectedMode] = useState<GameMode>('story');
   const [selectedChallenge, setSelectedChallenge] = useState<ChallengeModifier>(CHALLENGE_MODES[0]);
+
+  // Dynamic Battlefield Environment Composition for the selected realm
+  const [composition, setComposition] = useState<BattlefieldComposition>(() => 
+    getBattlefieldComposition(REALMS_DATA[0])
+  );
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // When realm changes, randomly select an environment composition
+  useEffect(() => {
+    setIsTransitioning(true);
+    const newComp = getBattlefieldComposition(selectedRealm);
+    setComposition(newComp);
+    const timer = setTimeout(() => setIsTransitioning(false), 200);
+    return () => clearTimeout(timer);
+  }, [selectedRealm.id]);
+
+  // Manual composition cycle / atmospheric shift
+  const handleCycleComposition = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    soundEngine.playPlacement();
+    setIsTransitioning(true);
+    const variations = REALM_BATTLEFIELD_VARIATIONS[selectedRealm.id] || [];
+    if (variations.length > 1) {
+      const currIdx = variations.findIndex(v => v.id === composition.id);
+      const nextIdx = (currIdx + 1) % variations.length;
+      setComposition(variations[nextIdx]);
+    } else {
+      setComposition(getBattlefieldComposition(selectedRealm, Math.floor(Math.random() * 10) + 1));
+    }
+    setTimeout(() => setIsTransitioning(false), 200);
+  };
 
   // When progression resets or saveState changes, snap back to initial realm if current became locked
   useEffect(() => {
@@ -61,9 +114,20 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
   return (
     <div 
       id="realm-select-screen"
-      className="min-h-[calc(100vh-50px)] w-full p-4 sm:p-6 lg:p-8 bg-neutral-950 text-neutral-100 flex flex-col justify-between max-w-7xl mx-auto"
+      className="relative min-h-[calc(100vh-50px)] w-full p-4 sm:p-6 lg:p-8 bg-neutral-950 text-neutral-100 flex flex-col justify-between max-w-7xl mx-auto overflow-hidden"
     >
-      {/* Header with Back button and Mode selector */}
+      {/* Subtle Ambient Battlefield Aura in the Screen Background */}
+      <div 
+        className="absolute inset-0 -z-10 pointer-events-none opacity-20 filter blur-3xl scale-110 transition-all duration-1000"
+        style={{
+          backgroundImage: `url(${composition.imageUrl})`,
+          backgroundPosition: 'center',
+          backgroundSize: 'cover'
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Header with Back button, Rank indicator, and Mode selector */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-amber-900/30 pb-4">
         <div className="flex items-center space-x-3">
           <button
@@ -75,9 +139,20 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="font-cinzel text-xl sm:text-2xl font-bold tracking-wider text-amber-300">
-              SELECT REALM BATTLEFIELD
-            </h1>
+            <div className="flex items-center space-x-2.5">
+              <h1 className="font-cinzel text-xl sm:text-2xl font-bold tracking-wider text-amber-300">
+                SELECT REALM BATTLEFIELD
+              </h1>
+              {/* Spirit Awakening / Player Cultivation Rank Indicator */}
+              <div 
+                id="realm-spirit-rank-badge"
+                className="hidden sm:inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-amber-950/60 border border-amber-500/40 text-xs text-amber-300 font-cinzel"
+                title="Current Cultivator Realm"
+              >
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>{saveState.playerCultivationRank}</span>
+              </div>
+            </div>
             <p className="text-xs sm:text-sm text-neutral-400">
               Deploy cultivators to defend ancient spiritual formations
             </p>
@@ -129,8 +204,110 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
         </div>
       </div>
 
+      {/* Dynamic Hero Realm Battlefield Environment Background */}
+      <div 
+        id="hero-realm-battlefield"
+        className="relative my-4 w-full rounded-2xl border border-amber-900/40 overflow-hidden shadow-2xl bg-neutral-950 min-h-[220px] sm:min-h-[260px] lg:min-h-[290px] flex flex-col justify-between group"
+      >
+        {/* Dynamic Realm Battlefield Background Image */}
+        <div className="absolute inset-0 z-0 overflow-hidden">
+          <img
+            id="battlefield-hero-image"
+            src={composition.imageUrl}
+            alt={`${selectedRealm.name} - ${composition.name}`}
+            referrerPolicy="no-referrer"
+            className={`w-full h-full object-cover object-center transition-all duration-700 ease-out transform ${
+              isTransitioning ? 'scale-105 opacity-60 filter blur-sm' : 'scale-100 opacity-90'
+            } group-hover:scale-[1.02]`}
+          />
+        </div>
+
+        {/* Live Elemental Battlefield Particles Canvas */}
+        <BattlefieldParticleCanvas
+          type={composition.particlesType}
+          className="absolute inset-0 w-full h-full z-10"
+        />
+
+        {/* Cinematic Multi-Layer Dark Vignettes & Soft Gradients for Contrast */}
+        <div className="absolute inset-0 z-10 bg-gradient-to-t from-neutral-950 via-neutral-950/60 to-neutral-950/40" />
+        <div className="absolute inset-0 z-10 bg-gradient-to-r from-neutral-950/95 via-neutral-950/60 to-neutral-950/70" />
+        <div 
+          className="absolute inset-0 z-10 opacity-25 pointer-events-none transition-all duration-700"
+          style={{
+            background: `radial-gradient(circle at 25% 45%, ${selectedRealm.accentColor || '#f59e0b'} 0%, transparent 65%)`
+          }}
+        />
+
+        {/* Top HUD Row inside Battlefield Stage */}
+        <div className="relative z-20 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-8 h-8 rounded-lg bg-neutral-950/80 border border-amber-500/50 flex items-center justify-center backdrop-blur-md shadow-md">
+              {getRealmIcon(selectedRealm.id)}
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-[11px] font-cinzel tracking-widest text-amber-400 font-bold uppercase">
+                  ACTIVE REALM BATTLEFIELD
+                </span>
+                <span className="w-1 h-1 rounded-full bg-amber-400/60" />
+                <span className="text-[10px] font-cinzel text-neutral-300">
+                  {composition.timeOfDay}
+                </span>
+              </div>
+              <h2 className="font-cinzel text-lg sm:text-2xl font-extrabold text-amber-100 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                {selectedRealm.name}
+              </h2>
+            </div>
+          </div>
+
+          {/* Composition Shift / Reroll Button & Angle Badge */}
+          <div className="flex items-center space-x-2">
+            <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-neutral-950/70 border border-neutral-800 text-[11px] text-neutral-300 backdrop-blur-md">
+              <Eye className="w-3.5 h-3.5 text-amber-400" />
+              <span>{composition.compositionAngle}</span>
+            </div>
+
+            <button
+              id="btn-shift-composition"
+              onClick={handleCycleComposition}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 text-amber-300 border border-amber-500/40 text-xs font-cinzel font-semibold backdrop-blur-md transition-all shadow-md active:scale-95"
+              title="Randomize battlefield composition and environmental perspective"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-amber-400 animate-spin-slow" />
+              <span>Shift Atmosphere ⟳</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom HUD Row inside Battlefield Stage */}
+        <div className="relative z-20 p-4 sm:p-5 flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="max-w-2xl">
+            <div className="text-xs font-cinzel font-semibold text-amber-300/90 tracking-wide flex items-center space-x-1.5">
+              <Mountain className="w-3.5 h-3.5 text-amber-400" />
+              <span>{composition.name}</span>
+            </div>
+            <p className="text-xs sm:text-sm text-neutral-200 mt-1 leading-relaxed drop-shadow line-clamp-2">
+              {composition.ambienceDescription}
+            </p>
+          </div>
+
+          {/* Environmental Hazards & Resonance Intel Pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="px-2.5 py-1 rounded-lg bg-neutral-950/80 border border-red-900/50 text-[11px] text-red-300 font-cinzel backdrop-blur-md flex items-center space-x-1.5 shadow-sm">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+              <span className="truncate max-w-[220px]">{composition.environmentalHazard}</span>
+            </div>
+
+            <div className="px-2.5 py-1 rounded-lg bg-neutral-950/80 border border-amber-600/40 text-[11px] text-amber-300 font-cinzel backdrop-blur-md flex items-center space-x-1.5 shadow-sm">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>{composition.qiResonance}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Main Content: Map Carousel / Grid and Selected Realm Detail */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 my-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 my-2">
         {/* Left Column: Realm Cards List */}
         <div className="lg:col-span-5 flex flex-col space-y-3">
           <div className="text-xs font-cinzel text-neutral-400 uppercase tracking-widest px-1">
@@ -153,7 +330,16 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
                   key={realm.id}
                   id={`realm-card-${realm.id}`}
                   onClick={() => {
-                    setSelectedRealm(realm);
+                    if (selectedRealm.id === realm.id) {
+                      const variations = REALM_BATTLEFIELD_VARIATIONS[realm.id] || [];
+                      if (variations.length > 1) {
+                        const currIdx = variations.findIndex(v => v.id === composition.id);
+                        const nextIdx = (currIdx + 1) % variations.length;
+                        setComposition(variations[nextIdx]);
+                      }
+                    } else {
+                      setSelectedRealm(realm);
+                    }
                     soundEngine.playPlacement();
                   }}
                   className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-center justify-between ${
