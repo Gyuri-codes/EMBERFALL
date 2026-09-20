@@ -135,9 +135,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
       {/* Top Banner / Donghua seal */}
       <div className="relative z-10 flex flex-col items-center pt-4">
-        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-950/40 border border-amber-500/30 text-xs text-amber-300 font-cinzel mb-2">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>CHINESE CULTIVATION STRATEGIC TOWER DEFENSE</span>
+        <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-amber-950/40 border border-amber-500/30 text-amber-300 font-cinzel mb-2">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="font-cinzel font-bold tracking-widest text-xs sm:text-[13px] text-amber-300">
+            STRATE<span className="relative inline-block">G<span className="absolute right-[0.05em] top-[53%] w-[0.25em] h-[0.11em] bg-current rounded-[0.5px] pointer-events-none -translate-y-1/2" aria-hidden="true" /></span>IC TOWER DEFENSE
+          </span>
         </div>
       </div>
 
