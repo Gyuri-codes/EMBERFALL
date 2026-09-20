@@ -91,6 +91,7 @@ export class GameEngine {
 
   // Particle limit based on graphics setting
   private maxParticles = 250;
+  private equippedCosmetics: Record<string, string> = {};
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -98,7 +99,8 @@ export class GameEngine {
     callbacks: GameEngineCallbacks,
     settings: GameSettings,
     gameMode: GameMode = 'story',
-    abilities: PlayerAbility[] = []
+    abilities: PlayerAbility[] = [],
+    equippedCosmetics: Record<string, string> = {}
   ) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d');
@@ -110,6 +112,7 @@ export class GameEngine {
     this.gameMode = gameMode;
     this.totalWaves = gameMode === 'endless' ? 999 : realm.totalWaves;
     this.abilities = abilities.map(a => ({ ...a }));
+    this.equippedCosmetics = equippedCosmetics;
 
     // Deep copy nodes
     this.placementNodes = realm.placementNodes.map(n => ({ ...n }));
@@ -188,23 +191,63 @@ export class GameEngine {
     const isBossWave = (wave % 10 === 0) || (wave === this.totalWaves);
 
     // Number of enemies scales with wave
-    const count = Math.min(8 + wave * 2, 35);
+    const count = Math.min(8 + wave * 2, 36);
 
-    // Monster HP scaling based on existing wave and area progression
+    // Territory Difficulty Multiplier
+    const difficultyMultipliers: Record<string, number> = {
+      EASY: 1.0,
+      MEDIUM: 1.35,
+      HARD: 1.85,
+      EXPERT: 2.6
+    };
+    const diffMultiplier = difficultyMultipliers[this.realm.difficulty] || 1.0;
+
+    // Progression scaling
     const realmIndex = Math.max(0, REALMS_DATA.findIndex(r => r.id === this.realm.id));
-    const areaHpMultiplier = 1 + realmIndex * 0.22;
-    const waveHpMultiplier = 1 + (wave - 1) * 0.18;
-    const hpScale = waveHpMultiplier * areaHpMultiplier;
+    const areaHpMultiplier = 1 + realmIndex * 0.18;
+    const waveHpMultiplier = 1 + (wave - 1) * 0.16;
+    const hpScale = waveHpMultiplier * areaHpMultiplier * diffMultiplier;
+
+    // Theme-specific monster selection
+    const theme = this.realm.musicMood || 'fire';
+    const isLateTerritory = realmIndex >= 5;
 
     for (let i = 0; i < count; i++) {
       let enemyType = 'emberling';
-      if (wave >= 3 && Math.random() < 0.3) enemyType = 'void_crawler';
-      if (wave >= 5 && Math.random() < 0.25) enemyType = 'ironhide_beast';
-      if (wave >= 7 && Math.random() < 0.2) enemyType = 'soul_leech';
-      if (wave >= 9 && Math.random() < 0.2) enemyType = 'shadow_assassin';
-      if (wave >= 12 && Math.random() < 0.2) enemyType = 'frost_wraith';
-      if (wave >= 15 && Math.random() < 0.25) enemyType = 'demon_knight';
-      if (wave >= 18 && Math.random() < 0.2) enemyType = 'spirit_devourer';
+
+      if (theme === 'sands') {
+        enemyType = Math.random() < 0.6 ? 'sand_stalker' : 'dune_wyrm';
+      } else if (theme === 'crystal') {
+        enemyType = Math.random() < 0.6 ? 'crystal_scuttler' : 'prismatic_colossus';
+      } else if (theme === 'frost') {
+        enemyType = Math.random() < 0.5 ? 'frost_wraith' : 'ironhide_beast';
+      } else if (theme === 'bamboo') {
+        enemyType = Math.random() < 0.5 ? 'void_crawler' : 'soul_leech';
+      } else if (theme === 'chaos') {
+        enemyType = Math.random() < 0.5 ? 'chaos_abomination' : 'celestial_heretic';
+      } else {
+        // General distribution based on wave & territory depth
+        const roll = Math.random();
+        if (wave >= 20 || isLateTerritory) {
+          if (roll < 0.2) enemyType = 'chaos_abomination';
+          else if (roll < 0.4) enemyType = 'terracotta_soldier';
+          else if (roll < 0.6) enemyType = 'magma_drake';
+          else if (roll < 0.8) enemyType = 'nether_phantom';
+          else enemyType = 'demon_knight';
+        } else if (wave >= 12) {
+          if (roll < 0.25) enemyType = 'demon_knight';
+          else if (roll < 0.5) enemyType = 'spirit_devourer';
+          else if (roll < 0.75) enemyType = 'frost_wraith';
+          else enemyType = 'shadow_assassin';
+        } else if (wave >= 6) {
+          if (roll < 0.3) enemyType = 'ironhide_beast';
+          else if (roll < 0.6) enemyType = 'soul_leech';
+          else if (roll < 0.8) enemyType = 'void_crawler';
+          else enemyType = 'emberling';
+        } else {
+          enemyType = roll < 0.6 ? 'emberling' : 'void_crawler';
+        }
+      }
 
       const baseConfig = ENEMIES_DATA[enemyType] || ENEMIES_DATA.emberling;
       const scaledConfig: EnemyConfig = {
@@ -219,18 +262,41 @@ export class GameEngine {
       });
     }
 
-    // Mini-boss or Abyssal Emperor
+    // Mini-boss or Signature Territory Boss
     if (isBossWave) {
       const isFinalBoss = wave === this.totalWaves;
-      const bossConfig: EnemyConfig = isFinalBoss 
-        ? {
-            ...ENEMIES_DATA.abyssal_emperor,
-            baseHp: Math.round(ENEMIES_DATA.abyssal_emperor.baseHp * hpScale)
-          }
-        : {
-            ...ENEMIES_DATA.abyssal_behemoth,
-            baseHp: Math.round(ENEMIES_DATA.abyssal_behemoth.baseHp * hpScale)
-          };
+      const REALM_BOSS_MAP: Record<string, string> = {
+        emberfall_valley: 'molten_behemoth',
+        moonlit_bamboo: 'mist_phantom',
+        frozen_heaven: 'glacial_wyrm',
+        thundercloud_peaks: 'thunder_lord',
+        jade_serpent_river: 'river_dragon_king',
+        crimson_lotus_peak: 'vermilion_phoenix',
+        whispering_pine_pass: 'grave_watcher',
+        golden_sands_dunes: 'dune_empress',
+        astral_observatory: 'astral_warden',
+        spirit_crystal_caverns: 'crystal_overlord',
+        vortex_sky_chasm: 'singularity_devourer',
+        molten_iron_foundry: 'forge_titan',
+        blighted_bone_marsh: 'nether_lich',
+        nine_heavens_spire: 'tribulation_sovereign',
+        primordial_chaos_rift: 'chaos_hydra',
+        nether_dragon_lair: 'undying_nether_dragon',
+        timeless_frost_glacier: 'chrono_frost_colossus',
+        celestial_sovereign_throne: 'corrupted_immortal_sovereign',
+        abyssal_rift_core: 'abyssal_emperor',
+        heart_of_the_last_realm: 'chaos_overlord_genesis',
+      };
+
+      const bossKey = isFinalBoss 
+        ? (REALM_BOSS_MAP[this.realm.id] || 'abyssal_emperor')
+        : (realmIndex > 8 ? 'prismatic_colossus' : 'abyssal_behemoth');
+
+      const rawBoss = ENEMIES_DATA[bossKey] || ENEMIES_DATA.abyssal_emperor;
+      const bossConfig: EnemyConfig = {
+        ...rawBoss,
+        baseHp: Math.round(rawBoss.baseHp * hpScale * (isFinalBoss ? 1.2 : 0.8))
+      };
 
       queue.push({
         config: bossConfig,
@@ -283,7 +349,7 @@ export class GameEngine {
 
   public upgradeGuardian(instanceId: string): boolean {
     const placed = this.placedGuardians.get(instanceId);
-    if (!placed || placed.level >= 5) return false;
+    if (!placed || placed.level >= 10) return false;
     const nextLevel = placed.level + 1;
     const upgradeData = UPGRADE_LEVELS.find(u => u.level === nextLevel);
     if (!upgradeData) return false;
@@ -298,8 +364,8 @@ export class GameEngine {
     soundEngine.playUpgrade();
     this.screenShakeIntensity = 6;
 
-    // Golden ascension burst
-    this.createAscensionBurst(placed.x, placed.y, '#f59e0b', 35);
+    // Golden ascension burst scales with level
+    this.createAscensionBurst(placed.x, placed.y, '#f59e0b', 35 + nextLevel * 3);
     this.addFloatingText(`Ascended to ${upgradeData.rankName}!`, placed.x, placed.y - 35, '#fbbf24', 18, true);
 
     this.callbacks.onEssenceChange(this.spiritEssence);
@@ -808,22 +874,82 @@ export class GameEngine {
     const isCrit = Math.random() < 0.15;
     const finalDamage = Math.round(rawDamage * (isCrit ? 1.75 : 1.0));
 
-    // Sound based on element
+    // Elemental procedural audio dispatch
     switch (config.element) {
-      case 'fire': soundEngine.playSwordQi(); break;
+      case 'fire': soundEngine.playFireball(); break;
       case 'lightning': soundEngine.playLightning(); break;
       case 'ice': soundEngine.playIce(); break;
       case 'wind': soundEngine.playWind(); break;
       case 'dragon': soundEngine.playSwordQi(); break;
+      case 'metal': soundEngine.playMetalClash(); break;
+      case 'lava': soundEngine.playLavaExplosion(); break;
+      case 'sand': soundEngine.playSandSwirl(); break;
+      case 'crystal': soundEngine.playCrystalResonance(); break;
+      case 'vortex': soundEngine.playVortexPull(); break;
       default: soundEngine.playSwordQi(); break;
     }
 
     if (config.attackType === 'instant_strike') {
-      // Shadow assassin teleport & strike without moving the pedestal anchor
-      target.hp -= Math.max(1, finalDamage - target.defense);
-      guardian.damageDealt += finalDamage;
+      // Shadow assassin instant strike
+      const effectiveDef = config.element === 'metal' ? Math.floor(target.defense * 0.5) : target.defense;
+      const isWeakness = target.config.elementWeakness === config.element;
+      const dmgMult = isWeakness ? 1.4 : 1.0;
+      const appliedDmg = Math.max(1, Math.round((finalDamage - effectiveDef) * dmgMult));
+
+      target.hp -= appliedDmg;
+      guardian.damageDealt += appliedDmg;
       this.createSlashEffect(target.x, target.y, config.color);
-      this.addFloatingText(`${finalDamage}`, target.x, target.y - 10, config.color, isCrit ? 18 : 14, isCrit);
+      this.addFloatingText(`${appliedDmg}`, target.x, target.y - 10, config.color, isCrit ? 18 : 14, isCrit);
+      if (isWeakness) {
+        this.addFloatingText('WEAKNESS!', target.x, target.y - 25, '#fbbf24', 11, true);
+      }
+      if (target.config.isBoss) {
+        this.callbacks.onBossStateChange({ ...target });
+      }
+      return;
+    }
+
+    if (config.attackType === 'beam') {
+      // Prismatic laser beam: direct instantaneous damage & defense shred
+      const effectiveDef = Math.max(0, target.defense - 2);
+      const isWeakness = target.config.elementWeakness === config.element;
+      const dmgMult = isWeakness ? 1.4 : 1.0;
+      const appliedDmg = Math.max(1, Math.round((finalDamage - effectiveDef) * dmgMult));
+
+      target.hp -= appliedDmg;
+      target.defense = Math.max(0, target.defense - 1);
+      guardian.damageDealt += appliedDmg;
+
+      // Draw beam particles from guardian to target
+      this.createBeamEffect(guardian.x, guardian.y, target.x, target.y, config.color);
+      this.addFloatingText(`${appliedDmg}`, target.x, target.y - 10, config.color, isCrit ? 18 : 14, isCrit);
+      if (isWeakness) {
+        this.addFloatingText('WEAKNESS!', target.x, target.y - 25, '#fbbf24', 11, true);
+      }
+      if (target.config.isBoss) {
+        this.callbacks.onBossStateChange({ ...target });
+      }
+      return;
+    }
+
+    if (config.attackType === 'vortex_pull') {
+      // Pull enemy back along path and burst AOE
+      const effectiveDef = target.defense;
+      const appliedDmg = Math.max(1, finalDamage - effectiveDef);
+      target.hp -= appliedDmg;
+      target.pathProgress = Math.max(0, target.pathProgress - 0.04);
+      guardian.damageDealt += appliedDmg;
+
+      this.createExplosionParticles(target.x, target.y, '#8b5cf6', 16);
+      this.addFloatingText(`${appliedDmg}`, target.x, target.y - 10, '#c084fc', 14, isCrit);
+
+      // Nearby enemies pull
+      this.activeEnemies.forEach(e => {
+        if (e.hp > 0 && e.id !== target.id && Math.hypot(e.x - target.x, e.y - target.y) <= 70) {
+          e.pathProgress = Math.max(0, e.pathProgress - 0.025);
+          e.hp -= Math.max(1, Math.round(appliedDmg * 0.5));
+        }
+      });
       if (target.config.isBoss) {
         this.callbacks.onBossStateChange({ ...target });
       }
@@ -857,7 +983,8 @@ export class GameEngine {
       return;
     }
 
-    // Launch projectile
+    // Launch projectile (fire, ice, wind, dragon, sand, lava, metal, celestial, etc.)
+    const isAoe = config.element === 'fire' || config.element === 'dragon' || config.element === 'lava';
     this.projectiles.push({
       id: `proj_${Math.random()}`,
       guardianId: guardian.instanceId,
@@ -868,53 +995,95 @@ export class GameEngine {
       targetY: target.y,
       targetEnemyId: target.id,
       damage: finalDamage,
-      speed: 420,
-      aoeRadius: config.element === 'fire' || config.element === 'dragon' ? 35 : 0,
+      speed: 460,
+      aoeRadius: isAoe ? 40 : 0,
       trailColor: config.color,
-      scale: 1 + (guardian.level - 1) * 0.15
+      scale: 1 + (guardian.level - 1) * 0.12
     });
   }
 
+  private createBeamEffect(x1: number, y1: number, x2: number, y2: number, color: string) {
+    const steps = 8;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      this.addParticle({
+        id: `beam_${Math.random()}`,
+        x: x1 + (x2 - x1) * t + (Math.random() - 0.5) * 4,
+        y: y1 + (y2 - y1) * t + (Math.random() - 0.5) * 4,
+        vx: (Math.random() - 0.5) * 10,
+        vy: (Math.random() - 0.5) * 10,
+        color,
+        size: 3,
+        alpha: 0.9,
+        decay: 3.5,
+        shape: 'ember'
+      });
+    }
+  }
+
   private handleProjectileHit(p: Projectile, directTarget?: ActiveEnemy) {
-    const config = GUARDIANS_DATA.find(g => g.element === p.element);
     const color = p.trailColor || '#f97316';
 
     if (p.aoeRadius > 0) {
       // AOE explosion
-      this.createExplosionParticles(p.targetX, p.targetY, color, 15);
+      this.createExplosionParticles(p.targetX, p.targetY, color, 18);
       this.activeEnemies.forEach(e => {
         if (e.hp <= 0) return;
         const dist = Math.hypot(e.x - p.targetX, e.y - p.targetY);
         if (dist <= p.aoeRadius + e.size) {
-          const dmg = Math.max(1, p.damage - e.defense);
+          const effectiveDef = p.element === 'metal' ? Math.floor(e.defense * 0.5) : e.defense;
+          const isWeak = e.config.elementWeakness === p.element;
+          const dmgMult = isWeak ? 1.4 : 1.0;
+          const dmg = Math.max(1, Math.round((p.damage - effectiveDef) * dmgMult));
           e.hp -= dmg;
-          if (p.element === 'fire') {
+
+          if (p.element === 'fire' || p.element === 'lava') {
             e.burnTimer = 3.5;
-            e.burnDps = 20;
+            e.burnDps = p.element === 'lava' ? 30 : 20;
           }
           this.addFloatingText(`${dmg}`, e.x, e.y - 10, color, 14);
+          if (isWeak) {
+            this.addFloatingText('WEAKNESS!', e.x, e.y - 25, '#fbbf24', 11, true);
+          }
           if (e.config.isBoss) {
             this.callbacks.onBossStateChange({ ...e });
           }
         }
       });
     } else {
-      // Direct single-target hit: direct target or nearest enemy in collision range
-      const hitEnemy = (directTarget && directTarget.hp > 0)
-        ? directTarget
-        : this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) <= (e.size + 14));
+      // Direct single-target hit: reliably detect living target even if in fast motion
+      let hitEnemy = (directTarget && directTarget.hp > 0) ? directTarget : null;
+
+      if (!hitEnemy) {
+        // Find nearest living enemy within generous collision radius
+        hitEnemy = this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) <= (e.size + 24)) || null;
+      }
+
+      // If still not matched, check near target location
+      if (!hitEnemy) {
+        hitEnemy = this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.targetX, e.y - p.targetY) <= (e.size + 30)) || null;
+      }
 
       if (hitEnemy) {
-        const dmg = Math.max(1, p.damage - hitEnemy.defense);
+        const effectiveDef = p.element === 'metal' ? Math.floor(hitEnemy.defense * 0.5) : hitEnemy.defense;
+        const isWeak = hitEnemy.config.elementWeakness === p.element;
+        const dmgMult = isWeak ? 1.4 : 1.0;
+        const dmg = Math.max(1, Math.round((p.damage - effectiveDef) * dmgMult));
         hitEnemy.hp -= dmg;
 
         if (p.element === 'ice') {
-          hitEnemy.slowFactor = 0.55;
+          hitEnemy.slowFactor = 0.50;
           hitEnemy.slowTimer = 3.0;
+        } else if (p.element === 'sand') {
+          hitEnemy.slowFactor = 0.65;
+          hitEnemy.slowTimer = 2.5;
         }
 
         this.createLotusBurst(hitEnemy.x, hitEnemy.y, color, 8);
         this.addFloatingText(`${dmg}`, hitEnemy.x, hitEnemy.y - 10, color, 14);
+        if (isWeak) {
+          this.addFloatingText('WEAKNESS!', hitEnemy.x, hitEnemy.y - 25, '#fbbf24', 11, true);
+        }
 
         if (hitEnemy.config.isBoss) {
           this.callbacks.onBossStateChange({ ...hitEnemy });
@@ -1245,42 +1414,129 @@ export class GameEngine {
   private renderRealmCore(ctx: CanvasRenderingContext2D) {
     const core = this.realm.corePosition;
     const time = performance.now() * 0.003;
+    const relic = this.equippedCosmetics['core_relic'];
 
     ctx.save();
     ctx.translate(core.x, core.y);
 
-    // Glowing protective spiritual field
+    // Glowing protective spiritual field (customized by relic)
     const pulse = Math.sin(time) * 4;
+    let fieldColorInner = 'rgba(56, 189, 248, 0.8)';
+    let fieldColorMid = 'rgba(14, 165, 233, 0.3)';
+    let fieldColorOuter = 'rgba(3, 105, 161, 0)';
+    let coreRingColor = '#38bdf8';
+
+    if (relic === 'relic_phoenix_core') {
+      fieldColorInner = 'rgba(249, 115, 22, 0.85)';
+      fieldColorMid = 'rgba(234, 88, 12, 0.35)';
+      fieldColorOuter = 'rgba(194, 65, 12, 0)';
+      coreRingColor = '#f97316';
+    } else if (relic === 'relic_glacial_core') {
+      fieldColorInner = 'rgba(165, 243, 252, 0.85)';
+      fieldColorMid = 'rgba(56, 189, 248, 0.35)';
+      fieldColorOuter = 'rgba(2, 132, 199, 0)';
+      coreRingColor = '#38bdf8';
+    } else if (relic === 'relic_yinyang_core') {
+      fieldColorInner = 'rgba(250, 204, 21, 0.8)';
+      fieldColorMid = 'rgba(217, 119, 6, 0.3)';
+      fieldColorOuter = 'rgba(180, 83, 9, 0)';
+      coreRingColor = '#fbbf24';
+    }
+
     const coreGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, 45 + pulse);
-    coreGrad.addColorStop(0, 'rgba(56, 189, 248, 0.8)');
-    coreGrad.addColorStop(0.6, 'rgba(14, 165, 233, 0.3)');
-    coreGrad.addColorStop(1, 'rgba(3, 105, 161, 0)');
+    coreGrad.addColorStop(0, fieldColorInner);
+    coreGrad.addColorStop(0.6, fieldColorMid);
+    coreGrad.addColorStop(1, fieldColorOuter);
     ctx.fillStyle = coreGrad;
     ctx.beginPath();
     ctx.arc(0, 0, 45 + pulse, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sacred Yin-Yang / Daoist Crystal Core
+    // Sacred Core Base
     ctx.fillStyle = '#0f172a';
-    ctx.strokeStyle = '#38bdf8';
+    ctx.strokeStyle = coreRingColor;
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(0, 0, 26, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Rotating inner petals
-    ctx.rotate(time * 0.5);
-    ctx.strokeStyle = '#facc15';
-    ctx.lineWidth = 1.5;
-    for (let p = 0; p < 6; p++) {
+    if (relic === 'relic_yinyang_core') {
+      // Rotating Taiji Yin-Yang
+      ctx.rotate(time * 0.8);
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.ellipse(0, 12, 6, 12, (p * Math.PI) / 3, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.arc(0, 0, 22, -Math.PI / 2, Math.PI / 2);
+      ctx.fill();
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(0, 0, 22, Math.PI / 2, (3 * Math.PI) / 2);
+      ctx.fill();
+      // Swirls
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(0, -11, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 11, 11, 0, Math.PI * 2);
+      ctx.fill();
+      // Dots
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, -11, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(0, 11, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.rotate(-time * 0.8);
+    } else if (relic === 'relic_phoenix_core') {
+      // Blazing Phoenix Halo
+      ctx.rotate(time * 1.2);
+      ctx.strokeStyle = '#ea580c';
+      ctx.lineWidth = 2;
+      for (let p = 0; p < 8; p++) {
+        ctx.beginPath();
+        ctx.moveTo(0, 20);
+        ctx.lineTo(6, 32);
+        ctx.lineTo(0, 28);
+        ctx.lineTo(-6, 32);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.rotate(Math.PI / 4);
+      }
+      ctx.rotate(-time * 1.2);
+    } else if (relic === 'relic_glacial_core') {
+      // Frost Crystal Obelisks
+      ctx.rotate(time * 0.6);
+      ctx.strokeStyle = '#a5f3fc';
+      ctx.lineWidth = 2;
+      for (let p = 0; p < 6; p++) {
+        ctx.beginPath();
+        ctx.moveTo(0, 18);
+        ctx.lineTo(4, 30);
+        ctx.lineTo(0, 34);
+        ctx.lineTo(-4, 30);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.rotate(Math.PI / 3);
+      }
+      ctx.rotate(-time * 0.6);
+    } else {
+      // Rotating default inner lotus petals
+      ctx.rotate(time * 0.5);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 1.5;
+      for (let p = 0; p < 6; p++) {
+        ctx.beginPath();
+        ctx.ellipse(0, 12, 6, 12, (p * Math.PI) / 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.rotate(-time * 0.5);
     }
 
     // Health text & Bar under core
-    ctx.rotate(-time * 0.5);
     const hpRatio = Math.max(0, this.coreHp / this.coreMaxHp);
     const barW = 60;
     const barH = 6;
@@ -1324,37 +1580,8 @@ export class GameEngine {
         ctx.globalAlpha = 1.0;
       }
 
-      // Visual upgrade level aura
-      if (guardian.level >= 2) {
-        // Elemental ring
-        ctx.strokeStyle = config.secondaryColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, 22 + Math.sin(time * 2) * 2, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      if (guardian.level >= 4) {
-        // Floating runic talismans
-        for (let i = 0; i < 4; i++) {
-          const a = time * 1.5 + (i * Math.PI) / 2;
-          const rx = Math.cos(a) * 30;
-          const ry = Math.sin(a) * 30;
-          ctx.fillStyle = '#f59e0b';
-          ctx.beginPath();
-          ctx.arc(rx, ry, 3.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      if (guardian.level === 5) {
-        // Transcendent golden mandala
-        ctx.strokeStyle = '#fbbf24';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(0, 0, 36, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      // Visual upgrade level evolution (Levels 1 to 10)
+      this.renderGuardianEvolutionVisuals(ctx, guardian, config, time);
 
       // Cultivator Body / Avatar
       ctx.fillStyle = config.color;
@@ -1363,7 +1590,7 @@ export class GameEngine {
       ctx.fill();
 
       // Flowing Cultivation Robes
-      ctx.fillStyle = '#0f172a';
+      ctx.fillStyle = guardian.level >= 7 ? '#1e1b4b' : '#0f172a';
       ctx.beginPath();
       ctx.moveTo(-10, 6);
       ctx.lineTo(10, 6);
@@ -1371,18 +1598,220 @@ export class GameEngine {
       ctx.lineTo(-14, 18);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = config.color;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = guardian.level >= 7 ? '#fbbf24' : config.color;
+      ctx.lineWidth = guardian.level >= 7 ? 2 : 1.5;
       ctx.stroke();
 
+      // Celestial Tribulation Pauldrons (Level 7+)
+      if (guardian.level >= 7) {
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(-15, 6, 5, 4);
+        ctx.fillRect(10, 6, 5, 4);
+      }
+
       // Level badge
-      ctx.fillStyle = '#fbbf24';
+      ctx.fillStyle = guardian.level === 10 ? '#facc15' : guardian.level >= 7 ? '#e0e7ff' : '#fbbf24';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(`Lv.${guardian.level}`, 0, 32);
 
+      // Supreme crown for Level 10
+      if (guardian.level === 10) {
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.moveTo(-8, -18);
+        ctx.lineTo(-4, -24);
+        ctx.lineTo(0, -20);
+        ctx.lineTo(4, -24);
+        ctx.lineTo(8, -18);
+        ctx.closePath();
+        ctx.fill();
+      }
+
       ctx.restore();
     });
+  }
+
+  private renderGuardianEvolutionVisuals(
+    ctx: CanvasRenderingContext2D,
+    guardian: PlacedGuardian,
+    config: GuardianConfig,
+    time: number
+  ) {
+    const lvl = guardian.level;
+
+    // Level 1: Subtle breathing Qi ring at feet
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.35 + Math.sin(time * 2) * 0.15;
+    ctx.beginPath();
+    ctx.arc(0, 12, 16, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+
+    // Level 2: Elemental Qi ring
+    if (lvl >= 2) {
+      ctx.strokeStyle = config.secondaryColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 22 + Math.sin(time * 3) * 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Level 3: Floating spiritual sword/weapon at side
+    if (lvl >= 3) {
+      const swordBob = Math.sin(time * 4) * 3;
+      ctx.save();
+      ctx.translate(18, -4 + swordBob);
+      ctx.rotate(0.3);
+      ctx.fillStyle = config.secondaryColor;
+      ctx.fillRect(-2, -14, 4, 20);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(-5, 6, 10, 3); // hilt
+      ctx.beginPath();
+      ctx.arc(0, -14, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Level 4: 4 Orbiting Bagua talismans
+    if (lvl >= 4) {
+      const talismanCount = lvl >= 8 ? 8 : 4;
+      for (let i = 0; i < talismanCount; i++) {
+        const a = time * 1.6 + (i * Math.PI * 2) / talismanCount;
+        const rx = Math.cos(a) * (28 + (lvl >= 8 ? 4 : 0));
+        const ry = Math.sin(a) * (20 + (lvl >= 8 ? 4 : 0));
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(a);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(-3, -6, 6, 12);
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(-2, -3, 4, 1.5);
+        ctx.fillRect(-2, 0, 4, 1.5);
+        ctx.restore();
+      }
+    }
+
+    // Level 5: Golden Nascent Soul spirit phantom aura
+    if (lvl >= 5) {
+      ctx.save();
+      ctx.globalAlpha = 0.35 + Math.sin(time * 2.5) * 0.15;
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.arc(0, -12, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Level 6: Dual counter-rotating concentric elemental rings
+    if (lvl >= 6) {
+      ctx.save();
+      ctx.strokeStyle = config.color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 6]);
+      ctx.lineDashOffset = time * 15;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = config.secondaryColor;
+      ctx.lineDashOffset = -time * 20;
+      ctx.beginPath();
+      ctx.arc(0, 0, 35, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // Level 7: Radiating starlight rays
+    if (lvl >= 7) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+      ctx.lineWidth = 1.5;
+      for (let r = 0; r < 8; r++) {
+        const rayAngle = (r * Math.PI) / 4 + time;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(rayAngle) * 22, Math.sin(rayAngle) * 22);
+        ctx.lineTo(Math.cos(rayAngle) * 38, Math.sin(rayAngle) * 38);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Level 8: 3D gyroscopic tilted orbital rings
+    if (lvl >= 8) {
+      ctx.save();
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 42, 14, time * 0.8, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 42, 14, -time * 0.8 + Math.PI / 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Level 9: Shimmering ethereal Qi wings
+    if (lvl >= 9) {
+      ctx.save();
+      const wingFlap = Math.sin(time * 5) * 0.15;
+      ctx.fillStyle = 'rgba(234, 179, 8, 0.35)';
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 1.5;
+
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(-8, 0);
+      ctx.bezierCurveTo(-28, -25 + wingFlap * 20, -42, -10, -12, 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(8, 0);
+      ctx.bezierCurveTo(28, -25 + wingFlap * 20, 42, -10, 12, 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Level 10: Supreme Transcendent Primordial Sovereign Mandala
+    if (lvl === 10) {
+      ctx.save();
+      // Outer 12-ray solar mandala
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 46, 0, Math.PI * 2);
+      ctx.stroke();
+
+      for (let m = 0; m < 12; m++) {
+        const ma = (m * Math.PI) / 6 + time * 0.5;
+        const mx = Math.cos(ma) * 46;
+        const my = Math.sin(ma) * 46;
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Floating golden ascension stars
+      for (let s = 0; s < 3; s++) {
+        const sa = time * 2 + (s * Math.PI * 2) / 3;
+        const sr = 34 + Math.sin(time * 3 + s) * 5;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(Math.cos(sa) * sr, Math.sin(sa) * sr, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 
   private renderEnemies(ctx: CanvasRenderingContext2D) {
@@ -1475,6 +1904,52 @@ export class GameEngine {
         ctx.beginPath();
         ctx.arc(0, 0, 10 * p.scale, -Math.PI * 0.4, Math.PI * 0.4);
         ctx.lineTo(0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (p.element === 'lava') {
+        // Molten magma orb with glowing core
+        ctx.beginPath();
+        ctx.arc(0, 0, 8 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath();
+        ctx.arc(0, 0, 4 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.element === 'metal') {
+        // Flying Spirit Dagger / Sword
+        ctx.beginPath();
+        ctx.moveTo(12 * p.scale, 0);
+        ctx.lineTo(-6 * p.scale, -3 * p.scale);
+        ctx.lineTo(-4 * p.scale, 0);
+        ctx.lineTo(-6 * p.scale, 3 * p.scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (p.element === 'ice') {
+        // Crystalline icicle
+        ctx.beginPath();
+        ctx.moveTo(11 * p.scale, 0);
+        ctx.lineTo(-5 * p.scale, -4 * p.scale);
+        ctx.lineTo(-8 * p.scale, 0);
+        ctx.lineTo(-5 * p.scale, 4 * p.scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (p.element === 'sand') {
+        // Swirling sand bead
+        ctx.beginPath();
+        ctx.arc(0, 0, 6 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d97706';
+        ctx.stroke();
+      } else if (p.element === 'crystal') {
+        // Prismatic diamond facet
+        ctx.beginPath();
+        ctx.moveTo(8 * p.scale, 0);
+        ctx.lineTo(0, -5 * p.scale);
+        ctx.lineTo(-8 * p.scale, 0);
+        ctx.lineTo(0, 5 * p.scale);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();

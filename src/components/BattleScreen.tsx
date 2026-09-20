@@ -133,7 +133,8 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
       },
       saveState.settings,
       gameMode,
-      abilities
+      abilities,
+      saveState.equippedCosmetics
     );
 
     engineRef.current = engine;

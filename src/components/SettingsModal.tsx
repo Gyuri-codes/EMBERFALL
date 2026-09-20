@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { GameSettings, GameSaveState } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { saveManager } from '../utils/saveManager';
-import { X, Volume2, Monitor, Eye, Keyboard, Cloud, RotateCcw, Copy, Check, AlertTriangle } from 'lucide-react';
+import { X, Volume2, Monitor, Eye, Keyboard, Cloud, RotateCcw, Copy, Check, AlertTriangle, Sparkles, Map, Award, ShoppingBag } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -12,6 +12,10 @@ interface SettingsModalProps {
   saveState: GameSaveState;
   onRestoreSave: (state: GameSaveState) => void;
   onResetProgress: () => void;
+  onResetCultivation?: () => void;
+  onResetRealms?: () => void;
+  onResetAchievements?: () => void;
+  onResetStore?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -21,7 +25,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   saveState,
   onRestoreSave,
-  onResetProgress
+  onResetProgress,
+  onResetCultivation,
+  onResetRealms,
+  onResetAchievements,
+  onResetStore
 }) => {
   const [activeTab, setActiveTab] = useState<'audio' | 'graphics' | 'accessibility' | 'controls' | 'cloud'>('audio');
   const [copied, setCopied] = useState(false);
@@ -136,7 +144,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             { id: 'graphics', label: 'Display', icon: <Monitor className="w-3.5 h-3.5" /> },
             { id: 'accessibility', label: 'Accessibility', icon: <Eye className="w-3.5 h-3.5" /> },
             { id: 'controls', label: 'Controls', icon: <Keyboard className="w-3.5 h-3.5" /> },
-            { id: 'cloud', label: 'Cloud Save', icon: <Cloud className="w-3.5 h-3.5" /> }
+            { id: 'cloud', label: 'Save & Reset', icon: <RotateCcw className="w-3.5 h-3.5" /> }
           ].map(tab => (
             <button
               key={tab.id}
@@ -424,33 +432,161 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {importError && <p className="text-xs text-red-400 mt-1">{importError}</p>}
               </div>
 
-              {/* Reset Section */}
-              <div className="pt-4 border-t border-red-900/30">
+              {/* Specific Progression Resets */}
+              <div className="pt-4 border-t border-neutral-800 space-y-3">
+                <div className="text-xs font-cinzel font-bold text-amber-300">
+                  Targeted Progression Reset
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Cultivation Reset */}
+                  <div className="p-3 rounded-lg bg-neutral-900/80 border border-neutral-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-neutral-200 flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Cultivation</span>
+                      </div>
+                      <div className="text-[10px] text-neutral-400">Skills, talents, & player rank</div>
+                    </div>
+                    <button
+                      id="btn-reset-cultivation"
+                      onClick={() => {
+                        if (onResetCultivation) {
+                          onResetCultivation();
+                          setCloudStatus('Cultivation progression reset to Spirit Awakening.');
+                          setTimeout(() => setCloudStatus(null), 3000);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-cinzel border border-neutral-700 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Realms Reset */}
+                  <div className="p-3 rounded-lg bg-neutral-900/80 border border-neutral-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-neutral-200 flex items-center space-x-1.5">
+                        <Map className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Realms</span>
+                      </div>
+                      <div className="text-[10px] text-neutral-400">Lock all territories & waves</div>
+                    </div>
+                    <button
+                      id="btn-reset-realms"
+                      onClick={() => {
+                        if (onResetRealms) {
+                          onResetRealms();
+                          setCloudStatus('Territories & Realm progress reset.');
+                          setTimeout(() => setCloudStatus(null), 3000);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-cinzel border border-neutral-700 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Achievements Reset */}
+                  <div className="p-3 rounded-lg bg-neutral-900/80 border border-neutral-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-neutral-200 flex items-center space-x-1.5">
+                        <Award className="w-3.5 h-3.5 text-yellow-400" />
+                        <span>Achievements</span>
+                      </div>
+                      <div className="text-[10px] text-neutral-400">Achievements & combat stats</div>
+                    </div>
+                    <button
+                      id="btn-reset-achievements"
+                      onClick={() => {
+                        if (onResetAchievements) {
+                          onResetAchievements();
+                          setCloudStatus('Achievements and battle records reset.');
+                          setTimeout(() => setCloudStatus(null), 3000);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-cinzel border border-neutral-700 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Store Items Reset */}
+                  <div className="p-3 rounded-lg bg-neutral-900/80 border border-neutral-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-neutral-200 flex items-center space-x-1.5">
+                        <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Store Items</span>
+                      </div>
+                      <div className="text-[10px] text-neutral-400">Cosmetics & shard balances</div>
+                    </div>
+                    <button
+                      id="btn-reset-store"
+                      onClick={() => {
+                        if (onResetStore) {
+                          onResetStore();
+                          setCloudStatus('Store items locked & shard balance reset.');
+                          setTimeout(() => setCloudStatus(null), 3000);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-cinzel border border-neutral-700 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Complete Game Progression Reset Section */}
+              <div className="pt-4 border-t border-red-900/40">
                 {!showResetConfirm ? (
-                  <button
-                    onClick={() => setShowResetConfirm(true)}
-                    className="text-xs text-red-400 hover:text-red-300 font-cinzel flex items-center space-x-1"
-                  >
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Reset All Cultivation Data</span>
-                  </button>
+                  <div className="p-3.5 rounded-xl bg-red-950/20 border border-red-900/40 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-cinzel font-bold text-red-300 flex items-center space-x-1.5">
+                        <AlertTriangle className="w-4 h-4 text-red-400" />
+                        <span>Reset All Game Progress</span>
+                      </div>
+                      <p className="text-[11px] text-neutral-400 mt-1 max-w-sm">
+                        Resets all unlocked territories, cultivator tower upgrades, Celestial Shards, and combat records back to the original starting game state.
+                      </p>
+                    </div>
+                    <button
+                      id="btn-trigger-reset-progress"
+                      onClick={() => setShowResetConfirm(true)}
+                      className="px-3 py-1.5 rounded-lg bg-red-950 hover:bg-red-900/80 border border-red-700/60 hover:border-red-500 text-xs text-red-200 font-cinzel font-semibold transition-all flex items-center space-x-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-red-400" />
+                      <span>Reset Game</span>
+                    </button>
+                  </div>
                 ) : (
-                  <div className="p-3 rounded-lg bg-red-950/40 border border-red-600 space-y-2">
-                    <p className="text-xs text-red-200">Are you certain? All unlocked cultivators, shards, and completed realms will be reset to default.</p>
-                    <div className="flex space-x-2">
+                  <div className="p-4 rounded-xl bg-red-950/40 border-2 border-red-600/80 space-y-3">
+                    <div className="flex items-center space-x-2 text-xs font-cinzel font-bold text-red-300">
+                      <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse" />
+                      <span>Are you sure you want to reset all progress?</span>
+                    </div>
+                    <ul className="text-[11px] text-red-200/90 list-disc list-inside space-y-1 bg-black/40 p-2.5 rounded-lg border border-red-900/40 font-mono">
+                      <li>Lock all territories back to their initial state (only Emberfall Valley unlocked).</li>
+                      <li>Reset all tower cultivator upgrades and skills to starting values.</li>
+                      <li>Reset Celestial Shards, achievements, and rewards to 0.</li>
+                      <li>Clear completed wave records, stage completions, and stats.</li>
+                    </ul>
+                    <div className="flex items-center space-x-2 pt-1">
                       <button
+                        id="btn-confirm-full-reset"
                         onClick={() => {
                           onResetProgress();
                           setShowResetConfirm(false);
                           onClose();
                         }}
-                        className="px-3 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-xs font-bold font-cinzel"
+                        className="px-4 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-xs font-bold font-cinzel transition-colors shadow-lg shadow-red-950 flex items-center space-x-1.5"
                       >
-                        Confirm Reset
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Confirm Full Reset</span>
                       </button>
                       <button
+                        id="btn-cancel-reset"
                         onClick={() => setShowResetConfirm(false)}
-                        className="px-3 py-1 rounded bg-neutral-800 text-neutral-300 text-xs"
+                        className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-cinzel transition-colors"
                       >
                         Cancel
                       </button>

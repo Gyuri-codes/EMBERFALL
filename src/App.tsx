@@ -192,10 +192,56 @@ export default function App() {
   };
 
   const handleResetProgress = () => {
-    saveManager.resetSave();
-    const fresh = saveManager.loadSaveState();
+    const fresh = saveManager.resetSave(saveState.settings);
     setSaveState(fresh);
+    setSelectedRealm(REALMS_DATA[0]);
+    setSelectedGameMode('story');
+    setSelectedChallenge(undefined);
     setCurrentScreen('home');
+    soundEngine.setMusicState('menu');
+    soundEngine.playTempleBell(220, 0.4);
+    handleAnnounce('All game progress has been completely reset to original state.');
+  };
+
+  const handleResetCultivation = () => {
+    setSaveState(prev => {
+      const updated = saveManager.resetCultivation(prev);
+      saveManager.saveState(updated);
+      return updated;
+    });
+    soundEngine.playPlacement();
+    handleAnnounce('Cultivation talents and rank reset.');
+  };
+
+  const handleResetRealms = () => {
+    setSaveState(prev => {
+      const updated = saveManager.resetRealms(prev);
+      saveManager.saveState(updated);
+      return updated;
+    });
+    setSelectedRealm(REALMS_DATA[0]);
+    soundEngine.playPlacement();
+    handleAnnounce('Realms and wave progress reset.');
+  };
+
+  const handleResetAchievements = () => {
+    setSaveState(prev => {
+      const updated = saveManager.resetAchievements(prev);
+      saveManager.saveState(updated);
+      return updated;
+    });
+    soundEngine.playPlacement();
+    handleAnnounce('Achievements and statistics reset.');
+  };
+
+  const handleResetStore = () => {
+    setSaveState(prev => {
+      const updated = saveManager.resetStore(prev);
+      saveManager.saveState(updated);
+      return updated;
+    });
+    soundEngine.playPlacement();
+    handleAnnounce('Store unlocked cosmetics and shards reset.');
   };
 
   return (
@@ -318,6 +364,10 @@ export default function App() {
           saveManager.saveState(imported);
         }}
         onResetProgress={handleResetProgress}
+        onResetCultivation={handleResetCultivation}
+        onResetRealms={handleResetRealms}
+        onResetAchievements={handleResetAchievements}
+        onResetStore={handleResetStore}
       />
 
       {/* Tutorial Modal */}

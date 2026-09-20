@@ -25,13 +25,16 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
 
   // Player's personal score calculated from cultivation and achievements
-  const calculatedPlayerScore = Math.max(
-    15000,
-    saveState.endlessHighScore * 4200 +
+  const calculatedPlayerScore = (
+    saveState.stats.totalEnemiesDefeated === 0 &&
+    saveState.completedRealmIds.length === 0 &&
+    saveState.endlessHighScore === 0
+  )
+    ? 0
+    : saveState.endlessHighScore * 4200 +
       saveState.stats.totalEnemiesDefeated * 50 +
       (saveState.stats.totalBossesSlain || saveState.stats.totalBossesDefeated || 0) * 850 +
-      saveState.completedRealmIds.length * 5000
-  );
+      saveState.completedRealmIds.length * 5000;
 
   const playerEntry: LeaderboardEntry = {
     rank: 1,

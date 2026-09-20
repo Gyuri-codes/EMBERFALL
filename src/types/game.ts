@@ -6,7 +6,12 @@ export type ElementType =
   | 'celestial' 
   | 'shadow' 
   | 'life' 
-  | 'dragon';
+  | 'dragon'
+  | 'metal'
+  | 'lava'
+  | 'crystal'
+  | 'vortex'
+  | 'sand';
 
 export type CultivationRank = 
   | 'Spirit Awakening'
@@ -15,8 +20,10 @@ export type CultivationRank =
   | 'Core Formation'
   | 'Nascent Soul'
   | 'Soul Transformation'
+  | 'Void Tribulation'
   | 'Heavenly Ascension'
-  | 'Immortal Sovereign';
+  | 'Immortal Sovereign'
+  | 'Primordial Chaos Ancestor';
 
 export interface GuardianConfig {
   id: string;
@@ -28,7 +35,7 @@ export interface GuardianConfig {
   baseDamage: number;
   baseRange: number; // in canvas coordinate units
   attackSpeed: number; // attacks per second
-  attackType: 'projectile' | 'instant_strike' | 'chain' | 'beam' | 'support_aura';
+  attackType: 'projectile' | 'instant_strike' | 'chain' | 'beam' | 'support_aura' | 'vortex_pull';
   description: string;
   attackName: string;
   ultimateName: string;
@@ -39,6 +46,8 @@ export interface GuardianConfig {
   avatarIcon: string; // Lucide icon name or emoji representation
   unlockedByDefault: boolean;
   unlockCostShards: number;
+  unlockCultivationRank?: CultivationRank;
+  unlockRequirementDesc?: string;
   quote: string;
 }
 
@@ -47,7 +56,7 @@ export interface PlacedGuardian {
   configId: string;
   x: number;
   y: number;
-  level: number; // 1 to 5
+  level: number; // 1 to 10
   damageDealt: number;
   kills: number;
   lastAttackTime: number;
@@ -154,12 +163,15 @@ export interface PlacementNode {
   placedGuardianInstanceId?: string;
 }
 
+export type TerritoryDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
+
 export interface RealmData {
   id: string;
   name: string;
   subtitle: string;
   description: string;
   theme: string;
+  difficulty: TerritoryDifficulty;
   totalWaves: number;
   path: RealmPoint[];
   placementNodes: PlacementNode[];
@@ -167,11 +179,14 @@ export interface RealmData {
   spawnPosition: RealmPoint;
   bgGradient: [string, string];
   accentColor: string;
-  musicMood: 'fire' | 'bamboo' | 'frost' | 'thunder' | 'abyss';
+  musicMood: 'fire' | 'bamboo' | 'frost' | 'thunder' | 'abyss' | 'serpent' | 'sands' | 'crystal' | 'chaos';
   bossName: string;
   bossDescription: string;
   recommendedPower: string;
   firstClearReward: number; // shards
+  unlockReqRealmId?: string;
+  unlockReqRank?: CultivationRank;
+  enemyTypes?: string[];
 }
 
 export interface PlayerAbility {
@@ -213,17 +228,26 @@ export interface CultivationSkillNode {
   effectValuePerLevel: number;
 }
 
-export interface CosmeticItem {
+export type StoreCategory = 'resource' | 'consumable' | 'utility' | 'cosmetic';
+
+export interface StoreItem {
   id: string;
-  targetType: 'guardian_skin' | 'core_relic' | 'battlefield_theme';
-  targetGuardianId?: string;
+  category?: StoreCategory;
   name: string;
   description: string;
   costShards: number;
   rarity: 'rare' | 'epic' | 'legendary' | 'divine';
-  previewColor: string;
-  unlocked: boolean;
+  icon?: string;
+  previewColor?: string;
+  unlocked?: boolean;
+  durationBattle?: boolean;
+  effectValue?: number;
+  effectType?: string;
+  targetType?: 'guardian_skin' | 'core_relic' | 'battlefield_theme';
+  targetGuardianId?: string;
 }
+
+export type CosmeticItem = StoreItem;
 
 export interface Achievement {
   id: string;
@@ -231,6 +255,7 @@ export interface Achievement {
   desc: string;
   name?: string;
   description?: string;
+  category?: 'territory' | 'waves' | 'towers' | 'cultivation' | 'combat' | 'store' | 'special';
   requirement?: number;
   rewardShards: number;
   unlocked: boolean;
@@ -288,7 +313,10 @@ export interface GameSaveState {
   highestWavesByRealm: Record<string, number>;
   endlessHighScore: number;
   unlockedCosmetics: string[];
+  unlockedStoreItems?: string[];
   equippedCosmetics: Record<string, string>;
+  activeConsumables?: Record<string, number>;
+  inventory?: Record<string, number>;
   allocatedSkills: Record<string, number>;
   achievements: Record<string, { unlocked: boolean; progress: number }>;
   claimedAchievements?: string[];

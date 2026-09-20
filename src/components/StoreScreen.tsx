@@ -98,8 +98,9 @@ export const StoreScreen: React.FC<StoreScreenProps> = ({
       {/* Items Showcase Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 my-4 overflow-y-auto max-h-[520px] pr-1">
         {filteredItems.map(item => {
+          const targetType = item.targetType || 'guardian_skin';
           const unlocked = isUnlocked(item.id);
-          const equipped = isEquipped(item.id, item.targetType);
+          const equipped = isEquipped(item.id, targetType);
           const canAfford = saveState.celestialShards >= item.costShards;
 
           return (
@@ -153,7 +154,7 @@ export const StoreScreen: React.FC<StoreScreenProps> = ({
                   <button
                     onClick={() => {
                       soundEngine.playPlacement();
-                      onEquipCosmetic(item.id, item.targetType);
+                      onEquipCosmetic(item.id, targetType);
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-cinzel font-bold transition-all ${
                       equipped 

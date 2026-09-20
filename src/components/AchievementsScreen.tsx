@@ -15,32 +15,104 @@ export const AchievementsScreen: React.FC<AchievementsScreenProps> = ({
   onClaimAchievement,
   onBack
 }) => {
+  const [activeCategory, setActiveCategory] = React.useState<string>('all');
+
   const getProgress = (ach: Achievement) => {
     const req = ach.requirement || ach.maxProgress || 1;
-    switch (ach.id) {
-      case 'first_blood':
-        return Math.min(req, (saveState.stats.totalBattlesWon > 0 || saveState.stats.totalEnemiesDefeated > 0) ? 1 : 0);
-      case 'slayer_50':
-      case 'slayer_300':
-      case 'demon_slayer':
-      case 'calamity_cleanser':
-        return Math.min(req, saveState.stats.totalEnemiesDefeated);
-      case 'realm_purifier':
-        return Math.min(req, saveState.completedRealmIds.length);
-      case 'first_boss':
-      case 'boss_conqueror':
-        return Math.min(req, saveState.stats.totalBossesSlain || saveState.stats.totalBossesDefeated || 0);
-      case 'master_upgrade':
-      case 'immortal_ascendance':
-        return Math.min(req, saveState.stats.highestLevelCultivatorReached || 1);
-      case 'dao_master':
-        return Math.min(req, Object.values(saveState.allocatedSkills).reduce((a, b) => a + b, 0));
-      case 'endless_survivor':
-      case 'endless_voyager':
-        return Math.min(req, saveState.endlessHighScore);
-      default:
-        return 0;
+
+    // Slayer / Kills
+    if (ach.id.startsWith('slayer_')) {
+      return Math.min(req, saveState.stats.totalEnemiesDefeated);
     }
+
+    // Boss Kills
+    if (ach.id.startsWith('boss_') || ach.id === 'first_boss') {
+      const bossKills = saveState.stats.totalBossesSlain || saveState.stats.totalBossesDefeated || 0;
+      return Math.min(req, bossKills);
+    }
+
+    // Realm / Territory Defended
+    if (ach.id.startsWith('realm_')) {
+      return Math.min(req, saveState.completedRealmIds.length);
+    }
+
+    // Specific Cultivator Recruitment
+    if (ach.id.endsWith('_master')) {
+      const guardianMap: Record<string, string> = {
+        flame_master: 'flame_sovereign',
+        thunder_master: 'thunder_immortal',
+        frost_master: 'frost_empress',
+        sword_master: 'sword_immortal',
+        earth_master: 'earth_general',
+        shadow_master: 'shadow_sovereign',
+        dragon_master: 'dragon_ascendant',
+        phoenix_master: 'vermilion_maiden',
+        sand_master: 'sand_alchemist',
+        crystal_master: 'crystal_sage',
+        vortex_master: 'vortex_monk',
+        celestial_master: 'celestial_primordial',
+      };
+      const gid = guardianMap[ach.id];
+      if (gid) {
+        return saveState.unlockedGuardianIds.includes(gid) ? 1 : 0;
+      }
+    }
+
+    if (ach.id === 'all_guardians') {
+      return Math.min(req, saveState.unlockedGuardianIds.length);
+    }
+
+    // In-Battle Tower Upgrades
+    if (ach.id.startsWith('upgrade_')) {
+      const highest = saveState.stats.highestLevelCultivatorReached || 1;
+      return Math.min(req, highest);
+    }
+
+    // Cultivation Rank Breakthroughs
+    if (ach.id.startsWith('rank_')) {
+      const rankOrder = [
+        'Qi Condensation',
+        'Foundation Establishment',
+        'Core Formation',
+        'Nascent Soul',
+        'Soul Transformation',
+        'Tribulation Transcendence',
+        'Heavenly Ascension'
+      ];
+      const playerIdx = rankOrder.indexOf(saveState.playerCultivationRank);
+      const targetRankMap: Record<string, number> = {
+        rank_foundation: 1,
+        rank_core: 2,
+        rank_nascent: 3,
+        rank_soul: 4,
+        rank_tribulation: 5,
+        rank_immortal: 6
+      };
+      const requiredIdx = targetRankMap[ach.id] || 0;
+      return playerIdx >= requiredIdx ? 1 : 0;
+    }
+
+    // Endless Mode
+    if (ach.id.startsWith('endless_')) {
+      return Math.min(req, saveState.endlessHighScore);
+    }
+
+    // Treasury & Shards
+    if (ach.id === 'treasury_first') {
+      return (saveState.unlockedCosmetics.length > 0) ? 1 : 0;
+    }
+    if (ach.id === 'treasury_5') {
+      return Math.min(req, saveState.unlockedCosmetics.length);
+    }
+    if (ach.id === 'shards_1000') {
+      return Math.min(req, saveState.celestialShards);
+    }
+
+    if (ach.id === 'first_blood') {
+      return Math.min(req, (saveState.stats.totalBattlesWon > 0 || saveState.stats.totalEnemiesDefeated > 0) ? 1 : 0);
+    }
+
+    return 0;
   };
 
   const handleClaim = (ach: Achievement) => {
@@ -79,9 +151,34 @@ export const AchievementsScreen: React.FC<AchievementsScreenProps> = ({
         </div>
       </div>
 
+      {/* Category Tabs */}
+      <div className="flex items-center space-x-2 my-3 overflow-x-auto pb-1">
+        {[
+          { id: 'all', label: 'All Feats' },
+          { id: 'combat', label: 'Slayer & Bosses' },
+          { id: 'territory', label: 'Territory Conquest' },
+          { id: 'towers', label: 'Cultivators' },
+          { id: 'cultivation', label: 'Breakthroughs' },
+          { id: 'waves', label: 'Endless Trials' },
+          { id: 'store', label: 'Treasury' }
+        ].map(cat => (
+          <button
+            key={cat.id}
+            onClick={() => setActiveCategory(cat.id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-cinzel whitespace-nowrap transition-colors ${
+              activeCategory === cat.id
+                ? 'bg-amber-600 text-white font-bold'
+                : 'bg-neutral-900 text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
       {/* Achievements Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6 overflow-y-auto max-h-[550px] pr-1">
-        {ACHIEVEMENTS_DATA.map((ach: Achievement) => {
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-3 overflow-y-auto max-h-[520px] pr-1">
+        {ACHIEVEMENTS_DATA.filter(ach => activeCategory === 'all' || ach.category === activeCategory).map((ach: Achievement) => {
           const req = ach.requirement || ach.maxProgress || 1;
           const progress = getProgress(ach);
           const isCompleted = progress >= req;

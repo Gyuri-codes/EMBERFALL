@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { REALMS_DATA } from '../data/realms';
 import { CHALLENGE_MODES } from '../data/store';
 import { GameMode, RealmData, ChallengeModifier, GameSaveState } from '../types/game';
-import { Flame, Compass, Snowflake, Zap, Skull, Shield, Swords, Play, Sparkles, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Flame, Compass, Snowflake, Zap, Skull, Shield, Swords, Play, Sparkles, AlertTriangle, ArrowLeft, Lock } from 'lucide-react';
 import { soundEngine } from '../audio/soundEngine';
 
 interface RealmSelectScreenProps {
@@ -20,6 +20,16 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
   const [selectedMode, setSelectedMode] = useState<GameMode>('story');
   const [selectedChallenge, setSelectedChallenge] = useState<ChallengeModifier>(CHALLENGE_MODES[0]);
 
+  // When progression resets or saveState changes, snap back to initial realm if current became locked
+  useEffect(() => {
+    const isLocked = Boolean(
+      selectedRealm.unlockReqRealmId && !saveState.completedRealmIds.includes(selectedRealm.unlockReqRealmId)
+    );
+    if (isLocked) {
+      setSelectedRealm(REALMS_DATA[0]);
+    }
+  }, [saveState.completedRealmIds]);
+
   const getRealmIcon = (id: string) => {
     switch (id) {
       case 'emberfall_valley': return <Flame className="w-5 h-5 text-orange-400" />;
@@ -31,7 +41,15 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
     }
   };
 
+  const isCurrentRealmLocked = Boolean(
+    selectedRealm.unlockReqRealmId && !saveState.completedRealmIds.includes(selectedRealm.unlockReqRealmId)
+  );
+  const currentPrevRealm = selectedRealm.unlockReqRealmId 
+    ? REALMS_DATA.find(r => r.id === selectedRealm.unlockReqRealmId) 
+    : null;
+
   const handleStart = () => {
+    if (isCurrentRealmLocked) return;
     soundEngine.playTempleBell(330, 0.3);
     onSelectRealm(
       selectedRealm, 
@@ -123,6 +141,12 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
             {REALMS_DATA.map((realm, idx) => {
               const isSelected = selectedRealm.id === realm.id;
               const isCleared = saveState.completedRealmIds.includes(realm.id);
+              const isLocked = Boolean(
+                realm.unlockReqRealmId && !saveState.completedRealmIds.includes(realm.unlockReqRealmId)
+              );
+              const prevRealm = realm.unlockReqRealmId 
+                ? REALMS_DATA.find(r => r.id === realm.unlockReqRealmId) 
+                : null;
 
               return (
                 <button
@@ -135,24 +159,32 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
                   className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-center justify-between ${
                     isSelected 
                       ? 'bg-neutral-900 border-amber-500 shadow-lg shadow-amber-950/40 ring-1 ring-amber-500' 
-                      : 'bg-neutral-900/60 border-neutral-800/80 hover:border-neutral-700 hover:bg-neutral-900'
+                      : isLocked
+                        ? 'bg-neutral-950/50 border-neutral-900 hover:border-neutral-800 hover:bg-neutral-900/40 opacity-75'
+                        : 'bg-neutral-900/60 border-neutral-800/80 hover:border-neutral-700 hover:bg-neutral-900'
                   }`}
                 >
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-neutral-950 border border-neutral-700">
-                      {getRealmIcon(realm.id)}
+                      {isLocked ? <Lock className="w-4 h-4 text-neutral-500" /> : getRealmIcon(realm.id)}
                     </div>
                     <div>
-                      <div className="font-cinzel text-sm sm:text-base font-bold text-neutral-100 flex items-center space-x-2">
+                      <div className={`font-cinzel text-sm sm:text-base font-bold flex items-center space-x-2 ${isLocked ? 'text-neutral-400' : 'text-neutral-100'}`}>
                         <span>{realm.name}</span>
                         {isCleared && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-300 font-sans">
                             CLEARED
                           </span>
                         )}
+                        {isLocked && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-900 border border-neutral-700/80 text-neutral-400 font-sans flex items-center space-x-0.5">
+                            <Lock className="w-2.5 h-2.5 mr-0.5" />
+                            <span>LOCKED</span>
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-neutral-400 line-clamp-1">
-                        {realm.subtitle}
+                        {isLocked && prevRealm ? `Requires: Defend ${prevRealm.name}` : realm.subtitle}
                       </div>
                     </div>
                   </div>
@@ -236,6 +268,19 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
               </div>
             </div>
 
+            {/* Territory Locked Notification Banner */}
+            {isCurrentRealmLocked && (
+              <div className="mt-4 p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/40 flex items-start space-x-3 text-xs text-amber-200">
+                <Lock className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-cinzel font-bold text-amber-300">Territory Sealed: </span>
+                  <span>
+                    Clear {currentPrevRealm ? currentPrevRealm.name : 'the previous territory'} in Story Mode to break the spiritual seal and unlock this realm.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Challenge Mode Modifier Picker (if Challenge Mode active) */}
             {selectedMode === 'challenge' && (
               <div className="mt-4 p-3 rounded-xl bg-amber-950/30 border border-amber-600/40">
@@ -265,16 +310,37 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
           {/* Enter Battle Action Button */}
           <div className="mt-8 pt-4 border-t border-neutral-800/80 flex items-center justify-between">
             <div className="text-xs text-neutral-400 hidden sm:block">
-              Clicking below will deploy you to the frontline immediately.
+              {isCurrentRealmLocked ? (
+                <span className="text-amber-400 flex items-center space-x-1.5 font-cinzel">
+                  <Lock className="w-3.5 h-3.5 inline mr-1 text-amber-400" />
+                  <span>Defend {currentPrevRealm?.name || 'previous territory'} in Story Mode to unlock.</span>
+                </span>
+              ) : (
+                "Clicking below will deploy you to the frontline immediately."
+              )}
             </div>
 
             <button
               id="btn-enter-battle"
               onClick={handleStart}
-              className="w-full sm:w-auto px-8 py-3.5 rounded-xl font-cinzel font-bold text-base tracking-wider text-amber-950 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 shadow-xl shadow-amber-900/30 border border-amber-300 transform hover:scale-105 active:scale-100 transition-all flex items-center justify-center space-x-2.5"
+              disabled={isCurrentRealmLocked}
+              className={`w-full sm:w-auto px-8 py-3.5 rounded-xl font-cinzel font-bold text-base tracking-wider transition-all flex items-center justify-center space-x-2.5 ${
+                isCurrentRealmLocked
+                  ? 'bg-neutral-800/90 text-neutral-500 border border-neutral-700 cursor-not-allowed opacity-75'
+                  : 'text-amber-950 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 shadow-xl shadow-amber-900/30 border border-amber-300 transform hover:scale-105 active:scale-100'
+              }`}
             >
-              <Swords className="w-5 h-5 text-amber-950" />
-              <span>COMMENCE DEFENSE</span>
+              {isCurrentRealmLocked ? (
+                <>
+                  <Lock className="w-5 h-5 text-neutral-500" />
+                  <span>TERRITORY LOCKED</span>
+                </>
+              ) : (
+                <>
+                  <Swords className="w-5 h-5 text-amber-950" />
+                  <span>COMMENCE DEFENSE</span>
+                </>
+              )}
             </button>
           </div>
         </div>

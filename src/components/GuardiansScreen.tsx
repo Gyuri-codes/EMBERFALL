@@ -18,7 +18,8 @@ export const GuardiansScreen: React.FC<GuardiansScreenProps> = ({
   const [selectedGuardian, setSelectedGuardian] = useState<GuardianConfig>(GUARDIANS_DATA[0]);
 
   const isUnlocked = (id: string) => {
-    return selectedGuardian.unlockedByDefault || saveState.unlockedGuardianIds.includes(id);
+    const guardian = GUARDIANS_DATA.find(g => g.id === id);
+    return Boolean(guardian?.unlockedByDefault || saveState.unlockedGuardianIds.includes(id));
   };
 
   const handleUnlock = (guardian: GuardianConfig) => {
