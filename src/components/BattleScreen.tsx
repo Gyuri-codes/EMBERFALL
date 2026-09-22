@@ -42,6 +42,8 @@ interface BattleScreenProps {
   gameMode: GameMode;
   challenge?: ChallengeModifier;
   saveState: GameSaveState;
+  audioMuted?: boolean;
+  onToggleAudio?: () => void;
   onVictory: (stars: number, shardsEarned: number, totalKills: number) => void;
   onDefeat: (wave: number, totalKills: number) => void;
   onExit: () => void;
@@ -53,6 +55,8 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
   gameMode,
   challenge,
   saveState,
+  audioMuted,
+  onToggleAudio,
   onVictory,
   onDefeat,
   onExit,
@@ -112,14 +116,11 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
         },
         onBossStateChange: setActiveBoss,
         onSelectedGuardianChange: (guardian, node) => {
-          setSelectedGuardian(guardian);
-          setSelectedNode(node);
-          if (node && !node.placedGuardianInstanceId) {
-            // Pick first affordable guardian as default selection
-            setSelectedConfigToPlace(availableGuardians[0]);
-          } else {
-            setSelectedConfigToPlace(null);
-          }
+          setSelectedGuardian(guardian ? { ...guardian } : null);
+          setSelectedNode(node ? { ...node } : null);
+        },
+        onSelectedConfigChange: (config) => {
+          setSelectedConfigToPlace(config);
         },
         onVictory: (stars, shards, kills) => {
           setVictoryData({ stars, shards, kills });
@@ -197,8 +198,16 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
         resizeObserver.disconnect();
       }
       engine.destroy();
+      soundEngine.fadeOutMusic(0.15);
     };
   }, [realm]);
+
+  // Synchronize touch placement selection to GameEngine
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.setSelectedConfigToPlace(selectedConfigToPlace);
+    }
+  }, [selectedConfigToPlace]);
 
   const togglePause = () => {
     if (engineRef.current) {
@@ -227,16 +236,39 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
     }
   };
 
-  const handleUpgrade = () => {
+  const handleUpgrade = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
     if (engineRef.current && selectedGuardian) {
       engineRef.current.upgradeGuardian(selectedGuardian.instanceId);
     }
   };
 
-  const handleSell = () => {
+  const handleSell = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
     if (engineRef.current && selectedGuardian) {
       engineRef.current.sellGuardian(selectedGuardian.instanceId);
+      setSelectedGuardian(null);
+      setSelectedNode(null);
     }
+  };
+
+  const handleClearSelection = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedNode(null);
+    setSelectedGuardian(null);
+    setSelectedConfigToPlace(null);
+    if (engineRef.current) {
+      engineRef.current.clearSelection();
+    }
+  };
+
+  const handleExit = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
+    if (engineRef.current) {
+      engineRef.current.stop();
+    }
+    soundEngine.fadeOutMusic(0.15);
+    onExit();
   };
 
   const handlePriorityChange = (priority: 'first' | 'last' | 'strongest' | 'closest') => {
@@ -300,8 +332,12 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
           {!isWaveActive && (
             <button
               id="hud-btn-start-wave"
-              onClick={startNextWave}
-              className="px-4 py-2 rounded-lg font-cinzel font-bold text-xs sm:text-sm tracking-wider text-amber-950 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 shadow-md shadow-orange-950/40 border border-amber-300 animate-pulse flex items-center space-x-1.5 transition-all"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                startNextWave();
+              }}
+              className="px-4 py-2 rounded-lg font-cinzel font-bold text-xs sm:text-sm tracking-wider text-amber-950 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 shadow-md shadow-orange-950/40 border border-amber-300 animate-pulse flex items-center space-x-1.5 transition-all cursor-pointer active:scale-95"
               aria-label="Start next wave of enemies"
             >
               <Play className="w-4 h-4 fill-amber-950" />
@@ -361,8 +397,12 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
           {/* Speed Toggle: 1x, 2x, 3x */}
           <button
             id="hud-btn-speed"
-            onClick={cycleSpeed}
-            className="px-2.5 py-1 rounded-md bg-neutral-900 border border-neutral-700 hover:border-amber-500/50 text-xs font-cinzel font-bold text-amber-300 transition-colors"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              cycleSpeed();
+            }}
+            className="px-2.5 py-1 rounded-md bg-neutral-900 border border-neutral-700 hover:border-amber-500/50 text-xs font-cinzel font-bold text-amber-300 transition-colors cursor-pointer active:scale-95"
             title="Change Game Speed (1x, 2x, 3x)"
             aria-label={`Current speed ${gameSpeed}x. Click to cycle.`}
           >
@@ -372,19 +412,41 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
           {/* Pause Toggle */}
           <button
             id="hud-btn-pause"
-            onClick={togglePause}
-            className="p-1.5 rounded-md bg-neutral-900 border border-neutral-700 hover:border-amber-500/50 text-neutral-300 hover:text-amber-300 transition-colors"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePause();
+            }}
+            className="p-1.5 rounded-md bg-neutral-900 border border-neutral-700 hover:border-amber-500/50 text-neutral-300 hover:text-amber-300 transition-colors cursor-pointer active:scale-95"
             title={isPaused ? "Resume Battle" : "Pause Battle"}
             aria-label={isPaused ? "Game paused, click to resume" : "Game running, click to pause"}
           >
             {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4" />}
           </button>
 
+          {/* Audio Mute/Unmute */}
+          {onToggleAudio && (
+            <button
+              id="hud-btn-mute"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleAudio();
+              }}
+              className="p-1.5 rounded-md bg-neutral-900 border border-neutral-700 hover:border-amber-500/50 text-neutral-300 hover:text-amber-300 transition-colors cursor-pointer active:scale-95"
+              title={audioMuted ? "Unmute Audio" : "Mute Audio"}
+              aria-label={audioMuted ? "Audio muted, click to unmute" : "Audio active, click to mute"}
+            >
+              {audioMuted ? <VolumeX className="w-4 h-4 text-neutral-500" /> : <Volume2 className="w-4 h-4 text-amber-400" />}
+            </button>
+          )}
+
           {/* Exit / Surrender */}
           <button
             id="hud-btn-exit"
-            onClick={onExit}
-            className="p-1.5 rounded-md bg-neutral-900 border border-neutral-700 hover:border-red-500/50 text-neutral-400 hover:text-red-400 transition-colors"
+            type="button"
+            onClick={handleExit}
+            className="p-1.5 rounded-md bg-neutral-900 border border-neutral-700 hover:border-red-500/60 text-neutral-400 hover:text-red-400 active:scale-95 transition-all cursor-pointer"
             title="Exit Battlefield"
             aria-label="Exit Battlefield"
           >
@@ -420,17 +482,44 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
       {/* 3. MAIN CANVAS CONTAINER (Full Interactive Touch & Canvas) */}
       <div 
         id="battle-canvas-stage"
-        className="relative flex-1 w-full h-full cursor-crosshair overflow-hidden"
+        className="relative flex-1 w-full h-full min-h-0 cursor-crosshair overflow-hidden touch-none select-none"
+        style={{ touchAction: 'none' }}
       >
         <canvas 
           ref={canvasRef} 
-          className="w-full h-full block" 
+          className="w-full h-full block touch-none" 
+          style={{ touchAction: 'none' }}
         />
 
+        {/* Active placement mobile guide banner */}
+        {selectedConfigToPlace && (
+          <div 
+            id="mobile-placement-guide"
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-4 py-1.5 rounded-full bg-neutral-950/95 border border-amber-400/90 text-amber-300 text-xs font-cinzel font-bold shadow-2xl backdrop-blur-md flex items-center space-x-2.5 animate-pulse select-none"
+          >
+            <span className="w-2.5 h-2.5 rounded-full ring-2 ring-white/50 shrink-0" style={{ backgroundColor: selectedConfigToPlace.color }} />
+            <span className="whitespace-nowrap">Tap any glowing ☯ Pedestal to deploy <strong>{selectedConfigToPlace.name}</strong></span>
+            <button
+              id="btn-cancel-placement"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedConfigToPlace(null);
+                if (engineRef.current) {
+                  engineRef.current.setSelectedConfigToPlace(null);
+                }
+              }}
+              className="ml-1.5 px-2 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-[10px] font-sans border border-neutral-600 transition-colors pointer-events-auto cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Strategic instructions hint when empty */}
-        {currentWave === 0 && !selectedNode && (
+        {currentWave === 0 && !selectedNode && !selectedConfigToPlace && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none bg-neutral-950/80 border border-amber-500/30 rounded-xl px-4 py-2.5 text-center text-xs text-amber-200 backdrop-blur-sm shadow-xl">
-            <span className="font-cinzel font-bold">Tap any ☯ Pedestal</span> along the path to deploy your Cultivators.
+            <span className="font-cinzel font-bold">Tap a Cultivator below, then tap any ☯ Pedestal</span> to deploy.
           </div>
         )}
       </div>
@@ -439,7 +528,10 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
       {selectedNode && (
         <div 
           id="node-inspector-drawer"
-          className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-3 pointer-events-auto"
+          className="absolute bottom-28 sm:bottom-24 md:bottom-20 left-1/2 -translate-x-1/2 z-40 w-full max-w-xl px-3 pointer-events-auto"
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
         >
           <div className="bg-neutral-950/95 border-2 border-amber-500/60 rounded-2xl p-3 sm:p-4 shadow-2xl backdrop-blur-md">
             {/* If empty node: Show deploy options */}
@@ -450,8 +542,10 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                     Deploy Cultivator to Pedestal
                   </div>
                   <button 
-                    onClick={() => setSelectedNode(null)}
-                    className="text-neutral-400 hover:text-neutral-200 text-xs px-2 py-0.5 rounded border border-neutral-800"
+                    id="btn-cancel-node-deploy"
+                    type="button"
+                    onClick={handleClearSelection}
+                    className="text-neutral-300 hover:text-white text-xs px-2.5 py-1 rounded-md border border-neutral-700 bg-neutral-900 hover:bg-neutral-800 active:scale-95 transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -464,11 +558,15 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                       <button
                         key={g.id}
                         id={`deploy-btn-${g.id}`}
-                        onClick={() => handlePlaceGuardianOnSelected(g)}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePlaceGuardianOnSelected(g);
+                        }}
                         disabled={!canAfford}
-                        className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                        className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer active:scale-95 ${
                           canAfford 
-                            ? 'bg-neutral-900/90 border-neutral-700 hover:border-amber-400 hover:bg-neutral-800' 
+                            ? 'bg-neutral-900/90 border-neutral-700 hover:border-amber-400 hover:bg-neutral-800 shadow-sm' 
                             : 'bg-neutral-950/60 border-neutral-800/60 opacity-50 cursor-not-allowed'
                         }`}
                       >
@@ -515,11 +613,11 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                   </div>
 
                   <button 
-                    onClick={() => {
-                      setSelectedNode(null);
-                      setSelectedGuardian(null);
-                    }}
-                    className="text-neutral-400 hover:text-neutral-200 p-1"
+                    id="btn-close-inspector"
+                    type="button"
+                    onClick={handleClearSelection}
+                    className="text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 p-1.5 rounded-lg border border-neutral-800 hover:border-neutral-700 active:scale-90 transition-all cursor-pointer"
+                    aria-label="Close inspector"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -555,8 +653,12 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                     {(['first', 'strongest', 'closest', 'last'] as const).map(p => (
                       <button
                         key={p}
-                        onClick={() => handlePriorityChange(p)}
-                        className={`px-1.5 py-0.5 rounded capitalize ${
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePriorityChange(p);
+                        }}
+                        className={`px-1.5 py-0.5 rounded capitalize cursor-pointer active:scale-95 transition-all ${
                           selectedGuardian.targetPriority === p 
                             ? 'bg-amber-600 text-white font-bold' 
                             : 'text-neutral-400 hover:text-neutral-200'
@@ -572,12 +674,13 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                     {nextUpgradeData ? (
                       <button
                         id="btn-upgrade-guardian"
+                        type="button"
                         onClick={handleUpgrade}
                         disabled={spiritEssence < nextUpgradeData.costEssence}
-                        className={`px-3 py-1.5 rounded-lg font-cinzel text-xs font-bold transition-all flex items-center space-x-1 ${
+                        className={`px-3 py-1.5 rounded-lg font-cinzel text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer active:scale-95 ${
                           spiritEssence >= nextUpgradeData.costEssence
                             ? 'bg-amber-500 hover:bg-amber-400 text-amber-950 shadow-md shadow-amber-950'
-                            : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                            : 'bg-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
                         }`}
                       >
                         <ChevronUp className="w-3.5 h-3.5" />
@@ -591,9 +694,11 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
 
                     <button
                       id="btn-sell-guardian"
+                      type="button"
                       onClick={handleSell}
-                      className="p-1.5 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-500/50 text-neutral-400 hover:text-red-400 transition-colors"
+                      className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-500/50 text-neutral-400 hover:text-red-400 active:scale-95 transition-all cursor-pointer"
                       title="Dissolve Cultivator (Refunds 65% Essence)"
+                      aria-label="Dissolve cultivator"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -617,29 +722,48 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
           </div>
           {availableGuardians.map(g => {
             const canAfford = spiritEssence >= g.baseCost;
+            const isSelected = selectedConfigToPlace?.id === g.id;
             return (
               <button
                 key={g.id}
                 id={`bar-guardian-${g.id}`}
+                type="button"
                 onPointerDown={(e) => {
-                  if (canAfford && engineRef.current) {
+                  // Only initiate mouse drag on PC, prevent hijacking single tap on mobile touch
+                  if (e.pointerType === 'mouse' && canAfford && engineRef.current) {
                     engineRef.current.startDragGuardian(g, e.clientX, e.clientY);
                   }
                 }}
-                onClick={() => {
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!canAfford) return;
                   if (selectedNode && !selectedNode.placedGuardianInstanceId) {
                     handlePlaceGuardianOnSelected(g);
                   } else {
-                    setSelectedConfigToPlace(g);
+                    if (selectedConfigToPlace?.id === g.id) {
+                      // Deselect if tapped again
+                      setSelectedConfigToPlace(null);
+                      if (engineRef.current) {
+                        engineRef.current.setSelectedConfigToPlace(null);
+                      }
+                    } else {
+                      setSelectedConfigToPlace(g);
+                      if (engineRef.current) {
+                        engineRef.current.setSelectedConfigToPlace(g);
+                      }
+                    }
                   }
                 }}
                 disabled={!canAfford}
-                className={`relative px-2.5 py-1.5 rounded-xl border flex items-center space-x-2 transition-all shrink-0 cursor-grab active:cursor-grabbing ${
-                  canAfford 
-                    ? 'bg-neutral-900/90 border-neutral-700/80 hover:border-amber-400 hover:scale-105 active:scale-95' 
+                className={`relative px-2.5 py-1.5 rounded-xl border flex items-center space-x-2 transition-all shrink-0 select-none ${
+                  isSelected
+                    ? 'bg-amber-950/80 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)] scale-105'
+                    : canAfford 
+                    ? 'bg-neutral-900/90 border-neutral-700/80 hover:border-amber-400 hover:scale-105 active:scale-95 cursor-pointer' 
                     : 'bg-neutral-950/60 border-neutral-800/60 opacity-40 cursor-not-allowed'
                 }`}
-                title={`${g.name} (${g.element.toUpperCase()}) - Click to select or drag onto pedestal`}
+                title={`${g.name} (${g.element.toUpperCase()}) - Tap to select, then tap pedestal to place`}
               >
                 <div 
                   className="w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs" 
@@ -648,7 +772,14 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
                   ☯
                 </div>
                 <div className="text-left">
-                  <div className="text-xs font-bold text-neutral-100 font-cinzel leading-tight">{g.name}</div>
+                  <div className="text-xs font-bold text-neutral-100 font-cinzel leading-tight flex items-center space-x-1">
+                    <span>{g.name}</span>
+                    {isSelected && (
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500 text-neutral-950 font-bold uppercase tracking-wider">
+                        READY
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[10px] text-cyan-300 font-bold font-sans">💧 {g.baseCost}</div>
                 </div>
               </button>
@@ -670,10 +801,14 @@ export const BattleScreen: React.FC<BattleScreenProps> = ({
               <button
                 key={ability.id}
                 id={`ability-btn-${ability.id}`}
+                type="button"
                 draggable={false}
-                onClick={() => handleCastAbility(ability.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCastAbility(ability.id);
+                }}
                 disabled={isOnCd || !canAfford}
-                className={`relative p-2 sm:px-3 sm:py-2 rounded-xl border flex flex-col items-center justify-center transition-all ${
+                className={`relative p-2 sm:px-3 sm:py-2 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer ${
                   !isOnCd && canAfford
                     ? 'bg-neutral-900 border-amber-500/60 hover:border-amber-400 hover:bg-neutral-800 shadow-md shadow-amber-950/40 active:scale-95'
                     : 'bg-neutral-950/70 border-neutral-800 text-neutral-600 opacity-60 cursor-not-allowed'

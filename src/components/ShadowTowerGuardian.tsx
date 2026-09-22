@@ -15,7 +15,7 @@ export const ShadowTowerGuardian: React.FC<ShadowTowerGuardianProps> = ({
       aria-hidden="true"
     >
       <div 
-        className="relative w-[500px] sm:w-[650px] md:w-[820px] lg:w-[960px] h-[650px] sm:h-[800px] md:h-[950px] lg:h-[1050px] -mt-10 sm:-mt-16 md:-mt-24 transition-transform duration-700 ease-out will-change-transform opacity-95"
+        className="relative w-[500px] sm:w-[650px] md:w-[820px] lg:w-[960px] h-[650px] sm:h-[800px] md:h-[950px] lg:h-[1050px] -mt-10 sm:-mt-16 md:-mt-24 transition-transform duration-700 ease-out will-change-transform opacity-95 filter contrast-[1.08] brightness-[0.96] drop-shadow-[0_20px_50px_rgba(0,0,0,0.95)]"
         style={{
           transform: `translate3d(${parallaxX * 10}px, ${parallaxY * 6}px, 0)`
         }}

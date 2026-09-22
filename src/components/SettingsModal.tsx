@@ -209,12 +209,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
                 <span className="text-neutral-300">Mute All Audio</span>
                 <input
+                  id="settings-mute-checkbox"
                   type="checkbox"
                   checked={settings.audioMuted}
                   onChange={(e) => {
                     const muted = e.target.checked;
+                    soundEngine.setMuted(muted);
                     onUpdateSettings({ ...settings, audioMuted: muted });
-                    soundEngine.toggleMute();
                   }}
                   className="w-4 h-4 accent-amber-500 cursor-pointer"
                 />

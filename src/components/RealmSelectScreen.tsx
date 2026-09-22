@@ -104,6 +104,7 @@ export const RealmSelectScreen: React.FC<RealmSelectScreenProps> = ({
   const handleStart = () => {
     if (isCurrentRealmLocked) return;
     soundEngine.playTempleBell(330, 0.3);
+    soundEngine.fadeOutMusic(0.2);
     onSelectRealm(
       selectedRealm, 
       selectedMode, 

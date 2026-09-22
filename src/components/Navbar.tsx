@@ -122,8 +122,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Audio Toggle */}
         <button
           id="nav-audio-toggle"
-          onClick={onToggleAudio}
-          className="p-1.5 rounded-md hover:bg-neutral-800 text-neutral-300 hover:text-amber-300 transition-colors border border-neutral-700/60"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleAudio();
+          }}
+          className="p-1.5 rounded-md hover:bg-neutral-800 text-neutral-300 hover:text-amber-300 transition-colors border border-neutral-700/60 cursor-pointer active:scale-95"
           title={audioMuted ? "Unmute Music & SFX" : "Mute Music & SFX"}
           aria-label={audioMuted ? "Audio muted, click to unmute" : "Audio active, click to mute"}
         >

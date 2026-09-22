@@ -111,6 +111,8 @@ export interface ActiveEnemy {
 export interface Projectile {
   id: string;
   guardianId: string;
+  guardianLevel?: number;
+  guardianConfigId?: string;
   element: ElementType;
   x: number;
   y: number;
@@ -137,6 +139,20 @@ export interface VisualParticle {
   shape: 'circle' | 'spark' | 'petal' | 'ember' | 'slash' | 'rune';
   rotation?: number;
   vRot?: number;
+}
+
+export interface VisualAttackBeam {
+  id: string;
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  color: string;
+  secondaryColor?: string;
+  duration: number;
+  elapsed: number;
+  type: 'lightning' | 'chain_lightning' | 'laser' | 'dragon_breath' | 'shadow_strike' | 'frost_chain';
+  secondaryTargets?: { x: number; y: number }[];
 }
 
 export interface FloatingText {

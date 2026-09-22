@@ -44,10 +44,15 @@ export default function App() {
     window.addEventListener('pointerdown', unlockAudio, { once: true });
     window.addEventListener('keydown', unlockAudio, { once: true });
 
-    soundEngine.setVolume(saveState.settings.musicVolume, saveState.settings.sfxVolume);
-    if (saveState.settings.audioMuted) {
-      soundEngine.toggleMute();
-    }
+    const initialMuted = Boolean(saveState.settings.audioMuted);
+    soundEngine.setMuted(initialMuted);
+    soundEngine.setVolumes(
+      saveState.settings.masterVolume ?? 0.8,
+      saveState.settings.musicVolume,
+      saveState.settings.sfxVolume,
+      saveState.settings.musicEnabled ?? true,
+      saveState.settings.sfxEnabled ?? true
+    );
 
     // High contrast mode attribute
     if (saveState.settings.highContrastMode || saveState.settings.highContrast) {
@@ -77,6 +82,15 @@ export default function App() {
       settings: newSettings
     }));
 
+    soundEngine.setMuted(Boolean(newSettings.audioMuted));
+    soundEngine.setVolumes(
+      newSettings.masterVolume ?? 0.8,
+      newSettings.musicVolume,
+      newSettings.sfxVolume,
+      newSettings.musicEnabled ?? true,
+      newSettings.sfxEnabled ?? true
+    );
+
     if (newSettings.highContrastMode) {
       document.documentElement.classList.add('high-contrast');
     } else {
@@ -89,11 +103,11 @@ export default function App() {
 
   const handleToggleAudio = () => {
     const nextMuted = !saveState.settings.audioMuted;
+    soundEngine.setMuted(nextMuted);
     handleUpdateSettings({
       ...saveState.settings,
       audioMuted: nextMuted
     });
-    soundEngine.toggleMute();
   };
 
   const handleAnnounce = (msg: string) => {
@@ -106,6 +120,7 @@ export default function App() {
     setSelectedRealm(realm);
     setSelectedGameMode(mode);
     setSelectedChallenge(challenge);
+    soundEngine.fadeOutMusic(0.2);
     setCurrentScreen('battle');
     handleAnnounce(`Entering ${realm.name} in ${mode} mode.`);
   };
@@ -306,10 +321,12 @@ export default function App() {
             gameMode={selectedGameMode}
             challenge={selectedChallenge}
             saveState={saveState}
+            audioMuted={Boolean(saveState.settings.audioMuted)}
+            onToggleAudio={handleToggleAudio}
             onVictory={handleVictory}
             onDefeat={handleDefeat}
             onExit={() => {
-              soundEngine.setMusicState('menu');
+              soundEngine.fadeOutMusic(0.15);
               setCurrentScreen('realms');
             }}
             onScreenReaderNotice={handleAnnounce}

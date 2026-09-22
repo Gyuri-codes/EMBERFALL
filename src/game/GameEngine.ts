@@ -11,6 +11,7 @@ import {
   Projectile,
   RealmData,
   VisualParticle,
+  VisualAttackBeam,
   GameSettings
 } from '../types/game';
 import { GUARDIANS_DATA, UPGRADE_LEVELS } from '../data/guardians';
@@ -25,6 +26,7 @@ export interface GameEngineCallbacks {
   onWaveChange: (wave: number, totalWaves: number, waveActive: boolean) => void;
   onBossStateChange: (boss: ActiveEnemy | null) => void;
   onSelectedGuardianChange: (guardian: PlacedGuardian | null, node: PlacementNode | null) => void;
+  onSelectedConfigChange?: (config: GuardianConfig | null) => void;
   onVictory: (stars: number, earnedShards: number, totalKills: number) => void;
   onDefeat: (waveReached: number, totalKills: number) => void;
   onScreenReaderNotice: (message: string) => void;
@@ -44,6 +46,7 @@ export class GameEngine {
   private gameSpeed = 1; // 1x, 2x, 3x
   private animationFrameId: number | null = null;
   private lastTimestamp = 0;
+  private battleSimulationTime = 0;
 
   // Currencies & Core
   public spiritEssence = 250;
@@ -66,13 +69,22 @@ export class GameEngine {
   private placementNodes: PlacementNode[] = [];
   public selectedNode: PlacementNode | null = null;
   public draggingGuardianConfig: GuardianConfig | null = null;
+  public selectedConfigToPlace: GuardianConfig | null = null;
   private dragScreenPos = { x: 0, y: 0 };
   private isDragging = false;
+
+  // Touch tracking for reliable mobile single-tap interaction
+  private lastTouchTime = 0;
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private touchStartTime = 0;
+  private touchMoved = false;
 
   // Projectiles & Particles
   private projectiles: Projectile[] = [];
   private particles: VisualParticle[] = [];
   private floatingTexts: FloatingText[] = [];
+  private visualAttackBeams: VisualAttackBeam[] = [];
 
   // Active abilities
   private abilities: PlayerAbility[] = [];
@@ -92,6 +104,8 @@ export class GameEngine {
   // Particle limit based on graphics setting
   private maxParticles = 250;
   private equippedCosmetics: Record<string, string> = {};
+  private resizeObserver: ResizeObserver | null = null;
+  private touchActiveOnCanvas = false;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -123,6 +137,14 @@ export class GameEngine {
     // Initial resize
     this.handleResize();
     this.setupInputs();
+
+    // Attach ResizeObserver to container for immediate layout tracking
+    if (typeof ResizeObserver !== 'undefined' && this.canvas.parentElement) {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.handleResize();
+      });
+      this.resizeObserver.observe(this.canvas.parentElement);
+    }
   }
 
   public applySettings(settings: GameSettings) {
@@ -138,7 +160,7 @@ export class GameEngine {
   public start() {
     this.isRunning = true;
     this.lastTimestamp = performance.now();
-    soundEngine.setMusicState('battle');
+    soundEngine.setMusicState('battle', this.realm.musicMood, this.realm.id);
     this.loop(this.lastTimestamp);
     this.callbacks.onWaveChange(this.currentWave, this.totalWaves, this.isWaveActive);
     this.callbacks.onCoreHpChange(this.coreHp, this.coreMaxHp);
@@ -179,9 +201,12 @@ export class GameEngine {
     this.projectiles = [];
     this.particles = [];
     this.floatingTexts = [];
+    this.visualAttackBeams = [];
+    this.battleSimulationTime = 0;
     this.placedGuardians.clear();
     this.placementNodes = this.realm.placementNodes.map(n => ({ ...n }));
     this.selectedNode = null;
+    this.selectedConfigToPlace = null;
     this.callbacks.onEssenceChange(this.spiritEssence);
     this.callbacks.onShardsChange(this.celestialShardsEarned);
     this.callbacks.onCoreHpChange(this.coreHp, this.coreMaxHp);
@@ -202,11 +227,11 @@ export class GameEngine {
 
     const isBossWave = (this.currentWave % 10 === 0) || (this.currentWave === this.totalWaves);
     if (isBossWave) {
-      soundEngine.setMusicState('boss');
+      soundEngine.setMusicState('boss', this.realm.musicMood, this.realm.id);
       this.callbacks.onScreenReaderNotice(`Alert: Boss wave ${this.currentWave} initiated!`);
       this.addFloatingText('BOSS CALAMITY ARRIVES!', this.VIRTUAL_WIDTH / 2, 180, '#ef4444', 28, true);
     } else {
-      soundEngine.setMusicState('battle');
+      soundEngine.setMusicState('battle', this.realm.musicMood, this.realm.id);
       this.callbacks.onScreenReaderNotice(`Wave ${this.currentWave} has begun.`);
     }
 
@@ -336,11 +361,38 @@ export class GameEngine {
 
   // --- GUARDIAN PLACEMENT & UPGRADE ---
 
+  public setSelectedConfigToPlace(config: GuardianConfig | null) {
+    this.selectedConfigToPlace = config;
+    if (this.callbacks.onSelectedConfigChange) {
+      this.callbacks.onSelectedConfigChange(config);
+    }
+  }
+
+  public clearSelection() {
+    this.selectedNode = null;
+    this.selectedConfigToPlace = null;
+    this.callbacks.onSelectedGuardianChange(null, null);
+    if (this.callbacks.onSelectedConfigChange) {
+      this.callbacks.onSelectedConfigChange(null);
+    }
+  }
+
   public placeGuardian(configId: string, node: PlacementNode): boolean {
     const config = GUARDIANS_DATA.find(g => g.id === configId);
-    if (!config || node.placedGuardianInstanceId) return false;
+    if (!config) {
+      console.warn(`[Emberfall] Configuration not found for guardian: ${configId}`);
+      return false;
+    }
+
+    // Canonical reference lookup to ensure placementNodes array is properly mutated
+    const targetNode = this.placementNodes.find(n => n.id === node.id) || node;
+    if (targetNode.placedGuardianInstanceId) {
+      this.addFloatingText('Pedestal already occupied!', targetNode.x, targetNode.y - 20, '#f59e0b', 15);
+      return false;
+    }
+
     if (this.spiritEssence < config.baseCost) {
-      this.addFloatingText('Insufficient Essence!', node.x, node.y - 20, '#ef4444', 16);
+      this.addFloatingText('Insufficient Essence!', targetNode.x, targetNode.y - 20, '#ef4444', 16);
       return false;
     }
 
@@ -349,27 +401,33 @@ export class GameEngine {
     const placed: PlacedGuardian = {
       instanceId,
       configId: config.id,
-      x: node.x,
-      y: node.y,
+      x: targetNode.x,
+      y: targetNode.y,
       level: 1,
       damageDealt: 0,
       kills: 0,
-      lastAttackTime: 0,
+      lastAttackTime: this.battleSimulationTime - (1 / config.attackSpeed),
       targetPriority: 'first',
       ultimateTimer: config.ultimateCooldown,
       isUltimateActive: false
     };
 
+    targetNode.placedGuardianInstanceId = instanceId;
     node.placedGuardianInstanceId = instanceId;
     this.placedGuardians.set(instanceId, placed);
+    this.selectedConfigToPlace = null;
+    this.selectedNode = targetNode;
     soundEngine.playPlacement();
 
     // Spawn placement lotus aura particles
-    this.createLotusBurst(node.x, node.y, config.color, 25);
-    this.addFloatingText(`${config.name} Deployed!`, node.x, node.y - 30, config.color, 16);
+    this.createLotusBurst(targetNode.x, targetNode.y, config.color, 25);
+    this.addFloatingText(`${config.name} Deployed!`, targetNode.x, targetNode.y - 30, config.color, 16);
 
     this.callbacks.onEssenceChange(this.spiritEssence);
-    this.callbacks.onSelectedGuardianChange(placed, node);
+    this.callbacks.onSelectedGuardianChange({ ...placed }, targetNode);
+    if (this.callbacks.onSelectedConfigChange) {
+      this.callbacks.onSelectedConfigChange(null);
+    }
     this.callbacks.onScreenReaderNotice(`Deployed ${config.name} at defense node.`);
     return true;
   }
@@ -396,7 +454,7 @@ export class GameEngine {
     this.addFloatingText(`Ascended to ${upgradeData.rankName}!`, placed.x, placed.y - 35, '#fbbf24', 18, true);
 
     this.callbacks.onEssenceChange(this.spiritEssence);
-    this.callbacks.onSelectedGuardianChange(placed, this.selectedNode);
+    this.callbacks.onSelectedGuardianChange({ ...placed }, this.selectedNode);
     this.callbacks.onScreenReaderNotice(`Cultivator advanced to rank ${upgradeData.rankName}!`);
     return true;
   }
@@ -424,9 +482,13 @@ export class GameEngine {
     this.createLotusBurst(placed.x, placed.y, '#94a3b8', 20);
     this.addFloatingText(`Dissolved (+${refund} Essence)`, placed.x, placed.y - 20, '#38bdf8', 16);
 
+    this.selectedNode = null;
+    this.selectedConfigToPlace = null;
     this.callbacks.onEssenceChange(this.spiritEssence);
     this.callbacks.onSelectedGuardianChange(null, null);
-    this.selectedNode = null;
+    if (this.callbacks.onSelectedConfigChange) {
+      this.callbacks.onSelectedConfigChange(null);
+    }
     return true;
   }
 
@@ -434,7 +496,7 @@ export class GameEngine {
     const placed = this.placedGuardians.get(instanceId);
     if (placed) {
       placed.targetPriority = priority;
-      this.callbacks.onSelectedGuardianChange(placed, this.selectedNode);
+      this.callbacks.onSelectedGuardianChange({ ...placed }, this.selectedNode);
     }
   }
 
@@ -533,6 +595,17 @@ export class GameEngine {
   };
 
   private update(dt: number) {
+    this.battleSimulationTime += dt;
+
+    // Advance visual attack beams (lightning strikes, lasers, dragon breath)
+    for (let bIdx = this.visualAttackBeams.length - 1; bIdx >= 0; bIdx--) {
+      const b = this.visualAttackBeams[bIdx];
+      b.elapsed += dt;
+      if (b.elapsed >= b.duration) {
+        this.visualAttackBeams.splice(bIdx, 1);
+      }
+    }
+
     // 1. Update ability cooldowns
     this.abilities.forEach(a => {
       if (a.currentCooldown > 0) {
@@ -615,7 +688,6 @@ export class GameEngine {
     }
 
     // 4. Update Placed Guardians & Attacks
-    const now = performance.now() / 1000;
     this.placedGuardians.forEach(guardian => {
       const config = GUARDIANS_DATA.find(g => g.id === guardian.configId);
       if (!config) return;
@@ -630,12 +702,12 @@ export class GameEngine {
         guardian.ultimateTimer = Math.max(0, guardian.ultimateTimer - dt);
       }
 
-      // Check attack target
-      if (now - guardian.lastAttackTime >= attackInterval) {
+      // Check attack target using battle simulation time (scales accurately with 1x, 2x, 3x game speed)
+      if (this.battleSimulationTime - guardian.lastAttackTime >= attackInterval) {
         const target = this.findTargetForGuardian(guardian, effectiveRange);
         if (target) {
           this.executeGuardianAttack(guardian, config, upgradeData, target);
-          guardian.lastAttackTime = now;
+          guardian.lastAttackTime = this.battleSimulationTime;
         }
       }
     });
@@ -667,19 +739,39 @@ export class GameEngine {
         p.x += (dx / dist) * step;
         p.y += (dy / dist) * step;
 
-        // Add small trail particle
+        // Add elemental trail particle
         if (Math.random() < 0.6) {
+          let shape: VisualParticle['shape'] = 'spark';
+          let decay = 3.5;
+          let pColor = p.trailColor;
+          if (p.element === 'fire' || p.element === 'lava' || p.element === 'dragon') {
+            shape = 'ember';
+          } else if (p.element === 'wind' || p.element === 'shadow') {
+            shape = 'slash';
+            decay = 4.0;
+          } else if (p.element === 'life') {
+            shape = 'petal';
+            decay = 3.0;
+          } else if (p.element === 'sand' || p.element === 'vortex') {
+            shape = 'circle';
+            decay = 3.0;
+          } else if (p.element === 'lightning') {
+            shape = 'spark';
+            pColor = Math.random() < 0.5 ? '#ffffff' : '#c084fc';
+            decay = 4.5;
+          }
+
           this.addParticle({
             id: `trail_${Math.random()}`,
             x: p.x,
             y: p.y,
-            vx: (Math.random() - 0.5) * 10,
-            vy: (Math.random() - 0.5) * 10,
-            color: p.trailColor,
+            vx: (Math.random() - 0.5) * 12,
+            vy: (Math.random() - 0.5) * 12,
+            color: pColor,
             size: p.scale * 3.5,
-            alpha: 0.8,
-            decay: 3.5,
-            shape: 'spark'
+            alpha: 0.85,
+            decay,
+            shape
           });
         }
       }
@@ -801,7 +893,7 @@ export class GameEngine {
     if (enemy.config.isBoss) {
       this.activeBoss = null;
       this.callbacks.onBossStateChange(null);
-      soundEngine.setMusicState('victory');
+      soundEngine.setMusicState('battle', this.realm.musicMood, this.realm.id);
       this.screenShakeIntensity = 10;
       this.addFloatingText('BOSS SLAIN!', enemy.x, enemy.y - 45, '#fbbf24', 24, true);
     }
@@ -850,7 +942,7 @@ export class GameEngine {
 
   private handleVictory() {
     this.stop();
-    soundEngine.setMusicState('victory');
+    soundEngine.setMusicState('victory', this.realm.musicMood, this.realm.id);
     const stars = this.coreHp >= this.coreMaxHp * 0.9 ? 3 : this.coreHp >= this.coreMaxHp * 0.4 ? 2 : 1;
     const finalShards = this.celestialShardsEarned + this.realm.firstClearReward;
     this.callbacks.onVictory(stars, finalShards, this.totalKills);
@@ -858,7 +950,7 @@ export class GameEngine {
 
   private handleDefeat() {
     this.stop();
-    soundEngine.setMusicState('defeat');
+    soundEngine.setMusicState('defeat', this.realm.musicMood, this.realm.id);
     this.callbacks.onDefeat(this.currentWave, this.totalKills);
   }
 
@@ -869,7 +961,7 @@ export class GameEngine {
       if (e.hp <= 0) return false;
       const dx = e.x - guardian.x;
       const dy = e.y - guardian.y;
-      return Math.sqrt(dx * dx + dy * dy) <= range;
+      return Math.sqrt(dx * dx + dy * dy) <= (range + e.size * 0.4);
     });
 
     if (inRange.length === 0) return null;
@@ -913,108 +1005,38 @@ export class GameEngine {
       case 'sand': soundEngine.playSandSwirl(); break;
       case 'crystal': soundEngine.playCrystalResonance(); break;
       case 'vortex': soundEngine.playVortexPull(); break;
+      case 'shadow': soundEngine.playSwordQi(); break;
+      case 'celestial': soundEngine.playTempleBell(880, 0.2); break;
+      case 'life': soundEngine.playTempleBell(659, 0.15); break;
       default: soundEngine.playSwordQi(); break;
     }
 
-    if (config.attackType === 'instant_strike') {
-      // Shadow assassin instant strike
-      const effectiveDef = config.element === 'metal' ? Math.floor(target.defense * 0.5) : target.defense;
-      const isWeakness = target.config.elementWeakness === config.element;
-      const dmgMult = isWeakness ? 1.4 : 1.0;
-      const appliedDmg = Math.max(1, Math.round((finalDamage - effectiveDef) * dmgMult));
-
-      target.hp -= appliedDmg;
-      guardian.damageDealt += appliedDmg;
-      this.createSlashEffect(target.x, target.y, config.color);
-      this.addFloatingText(`${appliedDmg}`, target.x, target.y - 10, config.color, isCrit ? 18 : 14, isCrit);
-      if (isWeakness) {
-        this.addFloatingText('WEAKNESS!', target.x, target.y - 25, '#fbbf24', 11, true);
-      }
-      if (target.config.isBoss) {
-        this.callbacks.onBossStateChange({ ...target });
-      }
-      return;
-    }
-
-    if (config.attackType === 'beam') {
-      // Prismatic laser beam: direct instantaneous damage & defense shred
-      const effectiveDef = Math.max(0, target.defense - 2);
-      const isWeakness = target.config.elementWeakness === config.element;
-      const dmgMult = isWeakness ? 1.4 : 1.0;
-      const appliedDmg = Math.max(1, Math.round((finalDamage - effectiveDef) * dmgMult));
-
-      target.hp -= appliedDmg;
-      target.defense = Math.max(0, target.defense - 1);
-      guardian.damageDealt += appliedDmg;
-
-      // Draw beam particles from guardian to target
-      this.createBeamEffect(guardian.x, guardian.y, target.x, target.y, config.color);
-      this.addFloatingText(`${appliedDmg}`, target.x, target.y - 10, config.color, isCrit ? 18 : 14, isCrit);
-      if (isWeakness) {
-        this.addFloatingText('WEAKNESS!', target.x, target.y - 25, '#fbbf24', 11, true);
-      }
-      if (target.config.isBoss) {
-        this.callbacks.onBossStateChange({ ...target });
-      }
-      return;
-    }
-
-    if (config.attackType === 'vortex_pull') {
-      // Pull enemy back along path and burst AOE
-      const effectiveDef = target.defense;
-      const appliedDmg = Math.max(1, finalDamage - effectiveDef);
-      target.hp -= appliedDmg;
-      target.pathProgress = Math.max(0, target.pathProgress - 0.04);
-      guardian.damageDealt += appliedDmg;
-
-      this.createExplosionParticles(target.x, target.y, '#8b5cf6', 16);
-      this.addFloatingText(`${appliedDmg}`, target.x, target.y - 10, '#c084fc', 14, isCrit);
-
-      // Nearby enemies pull
-      this.activeEnemies.forEach(e => {
-        if (e.hp > 0 && e.id !== target.id && Math.hypot(e.x - target.x, e.y - target.y) <= 70) {
-          e.pathProgress = Math.max(0, e.pathProgress - 0.025);
-          e.hp -= Math.max(1, Math.round(appliedDmg * 0.5));
-        }
-      });
-      if (target.config.isBoss) {
-        this.callbacks.onBossStateChange({ ...target });
-      }
-      return;
-    }
-
-    if (config.attackType === 'chain') {
-      // Lightning chain to up to 3 targets
-      let currentTarget = target;
-      const hitList = [target];
-      target.hp -= Math.max(1, finalDamage - target.defense);
-      this.createLightningParticles(target.x, target.y, config.color, 10);
-      if (target.config.isBoss) {
-        this.callbacks.onBossStateChange({ ...target });
-      }
-
-      for (let c = 0; c < 2; c++) {
-        const nextTarget = this.activeEnemies.find(e => e.hp > 0 && !hitList.includes(e) && Math.hypot(e.x - currentTarget.x, e.y - currentTarget.y) < 100);
-        if (nextTarget) {
-          hitList.push(nextTarget);
-          const chainDmg = Math.round(finalDamage * 0.7);
-          nextTarget.hp -= Math.max(1, chainDmg - nextTarget.defense);
-          this.createLightningParticles(nextTarget.x, nextTarget.y, config.color, 8);
-          if (nextTarget.config.isBoss) {
-            this.callbacks.onBossStateChange({ ...nextTarget });
-          }
-          currentTarget = nextTarget;
-        }
-      }
-      guardian.damageDealt += finalDamage;
-      return;
-    }
-
-    // Launch projectile (fire, ice, wind, dragon, sand, lava, metal, celestial, etc.)
+    // Determine projectile properties
     const isAoe = config.element === 'fire' || config.element === 'dragon' || config.element === 'lava';
+    let aoeRadius = 0;
+    if (config.element === 'lava') aoeRadius = 55;
+    else if (config.element === 'fire') aoeRadius = 40;
+    else if (config.element === 'dragon') aoeRadius = 45;
+
+    let projSpeed = 470;
+    if (config.element === 'celestial') projSpeed = 580;
+    else if (config.element === 'shadow') projSpeed = 540;
+    else if (config.element === 'lightning') projSpeed = 540;
+    else if (config.element === 'wind') projSpeed = 520;
+    else if (config.element === 'metal') projSpeed = 500;
+    else if (config.element === 'crystal') projSpeed = 500;
+    else if (config.element === 'ice') projSpeed = 480;
+    else if (config.element === 'sand') projSpeed = 460;
+    else if (config.element === 'life') projSpeed = 460;
+    else if (config.element === 'vortex') projSpeed = 440;
+    else if (config.element === 'lava') projSpeed = 420;
+
+    // Launch traveling elemental projectile toward targeted monster
     this.projectiles.push({
       id: `proj_${Math.random()}`,
       guardianId: guardian.instanceId,
+      guardianLevel: guardian.level,
+      guardianConfigId: guardian.configId,
       element: config.element,
       x: guardian.x,
       y: guardian.y,
@@ -1022,47 +1044,351 @@ export class GameEngine {
       targetY: target.y,
       targetEnemyId: target.id,
       damage: finalDamage,
-      speed: 460,
-      aoeRadius: isAoe ? 40 : 0,
+      speed: projSpeed,
+      aoeRadius,
       trailColor: config.color,
       scale: 1 + (guardian.level - 1) * 0.12
     });
+
+    // Add visible connecting attack beam/arc for lightning, laser, and dragon breath
+    if (config.element === 'lightning') {
+      this.addVisualBeam({
+        id: `beam_${Math.random()}`,
+        startX: guardian.x,
+        startY: guardian.y,
+        targetX: target.x,
+        targetY: target.y,
+        color: config.color,
+        secondaryColor: config.secondaryColor || '#ec4899',
+        duration: 0.16,
+        elapsed: 0,
+        type: 'lightning'
+      });
+    } else if (config.element === 'crystal') {
+      this.addVisualBeam({
+        id: `beam_${Math.random()}`,
+        startX: guardian.x,
+        startY: guardian.y,
+        targetX: target.x,
+        targetY: target.y,
+        color: config.color,
+        secondaryColor: config.secondaryColor || '#a855f7',
+        duration: 0.14,
+        elapsed: 0,
+        type: 'laser'
+      });
+    } else if (config.element === 'dragon') {
+      this.addVisualBeam({
+        id: `beam_${Math.random()}`,
+        startX: guardian.x,
+        startY: guardian.y,
+        targetX: target.x,
+        targetY: target.y,
+        color: config.color,
+        secondaryColor: config.secondaryColor || '#38bdf8',
+        duration: 0.18,
+        elapsed: 0,
+        type: 'dragon_breath'
+      });
+    } else if (config.element === 'shadow') {
+      this.createSlashEffect(target.x, target.y, config.color);
+    }
   }
 
-  private createBeamEffect(x1: number, y1: number, x2: number, y2: number, color: string) {
-    const steps = 8;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      this.addParticle({
-        id: `beam_${Math.random()}`,
-        x: x1 + (x2 - x1) * t + (Math.random() - 0.5) * 4,
-        y: y1 + (y2 - y1) * t + (Math.random() - 0.5) * 4,
-        vx: (Math.random() - 0.5) * 10,
-        vy: (Math.random() - 0.5) * 10,
-        color,
-        size: 3,
-        alpha: 0.9,
-        decay: 3.5,
-        shape: 'ember'
-      });
+  public addVisualBeam(beam: VisualAttackBeam) {
+    this.visualAttackBeams.push(beam);
+  }
+
+  private createElementalImpact(element: ElementType, x: number, y: number, color: string) {
+    switch (element) {
+      case 'lightning': {
+        for (let i = 0; i < 7; i++) {
+          const angle = (Math.PI * 2 * i) / 7 + (Math.random() - 0.5) * 0.5;
+          const spd = 40 + Math.random() * 45;
+          this.addParticle({
+            id: `lt_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#ffffff' : color,
+            size: 2.5 + Math.random() * 2.5,
+            alpha: 1.0,
+            decay: 3.2,
+            shape: 'spark'
+          });
+        }
+        break;
+      }
+      case 'fire': {
+        for (let i = 0; i < 7; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 30 + Math.random() * 35;
+          this.addParticle({
+            id: `fire_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd - 15,
+            color: Math.random() < 0.6 ? '#f97316' : '#ef4444',
+            size: 3 + Math.random() * 3,
+            alpha: 1.0,
+            decay: 2.8,
+            shape: 'ember'
+          });
+        }
+        break;
+      }
+      case 'lava': {
+        for (let i = 0; i < 8; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 25 + Math.random() * 40;
+          this.addParticle({
+            id: `lava_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd - 10,
+            color: Math.random() < 0.5 ? '#ea580c' : '#fef08a',
+            size: 3.5 + Math.random() * 3,
+            alpha: 1.0,
+            decay: 2.4,
+            shape: 'ember'
+          });
+        }
+        break;
+      }
+      case 'ice': {
+        for (let i = 0; i < 7; i++) {
+          const angle = (Math.PI * 2 * i) / 7;
+          const spd = 28 + Math.random() * 30;
+          this.addParticle({
+            id: `ice_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#e0f2fe' : '#38bdf8',
+            size: 2.5 + Math.random() * 2.5,
+            alpha: 1.0,
+            decay: 2.5,
+            shape: 'spark'
+          });
+        }
+        break;
+      }
+      case 'wind': {
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 45 + Math.random() * 45;
+          this.addParticle({
+            id: `wind_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: '#34d399',
+            size: 3 + Math.random() * 2,
+            alpha: 0.9,
+            decay: 3.4,
+            shape: 'slash'
+          });
+        }
+        break;
+      }
+      case 'metal': {
+        for (let i = 0; i < 7; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 40 + Math.random() * 45;
+          this.addParticle({
+            id: `metal_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#fef08a' : '#eab308',
+            size: 2.5 + Math.random() * 2.5,
+            alpha: 1.0,
+            decay: 3.5,
+            shape: 'spark'
+          });
+        }
+        break;
+      }
+      case 'sand': {
+        for (let i = 0; i < 7; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 25 + Math.random() * 35;
+          this.addParticle({
+            id: `sand_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#f59e0b' : '#d97706',
+            size: 3 + Math.random() * 2.5,
+            alpha: 0.95,
+            decay: 2.6,
+            shape: 'circle'
+          });
+        }
+        break;
+      }
+      case 'crystal': {
+        for (let i = 0; i < 7; i++) {
+          const angle = (Math.PI * 2 * i) / 7;
+          const spd = 30 + Math.random() * 35;
+          this.addParticle({
+            id: `crys_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#f472b6' : '#c084fc',
+            size: 3 + Math.random() * 2.5,
+            alpha: 1.0,
+            decay: 3.0,
+            shape: 'spark'
+          });
+        }
+        break;
+      }
+      case 'vortex': {
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 30 + Math.random() * 30;
+          this.addParticle({
+            id: `vort_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: '#818cf8',
+            size: 3 + Math.random() * 3,
+            alpha: 0.9,
+            decay: 2.8,
+            shape: 'circle'
+          });
+        }
+        break;
+      }
+      case 'celestial': {
+        for (let i = 0; i < 7; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 35 + Math.random() * 40;
+          this.addParticle({
+            id: `cel_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#ffffff' : '#facc15',
+            size: 2.5 + Math.random() * 2.5,
+            alpha: 1.0,
+            decay: 3.2,
+            shape: 'spark'
+          });
+        }
+        break;
+      }
+      case 'shadow': {
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 30 + Math.random() * 35;
+          this.addParticle({
+            id: `shd_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: '#a855f7',
+            size: 3.5 + Math.random() * 2.5,
+            alpha: 0.9,
+            decay: 3.0,
+            shape: 'slash'
+          });
+        }
+        break;
+      }
+      case 'life': {
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 25 + Math.random() * 30;
+          this.addParticle({
+            id: `life_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: '#4ade80',
+            size: 3 + Math.random() * 2.5,
+            alpha: 0.95,
+            decay: 2.5,
+            shape: 'petal',
+            rotation: Math.random() * Math.PI,
+            vRot: (Math.random() - 0.5) * 5
+          });
+        }
+        break;
+      }
+      case 'dragon': {
+        for (let i = 0; i < 8; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 35 + Math.random() * 40;
+          this.addParticle({
+            id: `drg_imp_${Math.random()}`,
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: Math.random() < 0.5 ? '#38bdf8' : '#0284c7',
+            size: 3 + Math.random() * 3,
+            alpha: 1.0,
+            decay: 2.8,
+            shape: 'ember'
+          });
+        }
+        break;
+      }
+      default: {
+        this.createLotusBurst(x, y, color, 8);
+        break;
+      }
     }
   }
 
   private handleProjectileHit(p: Projectile, directTarget?: ActiveEnemy) {
     const color = p.trailColor || '#f97316';
+    const guardian = this.placedGuardians.get(p.guardianId);
+
+    // Find hit enemy
+    let hitEnemy = (directTarget && directTarget.hp > 0) ? directTarget : null;
+
+    if (!hitEnemy) {
+      hitEnemy = this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) <= (e.size + 24)) || null;
+    }
+    if (!hitEnemy) {
+      hitEnemy = this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.targetX, e.y - p.targetY) <= (e.size + 30)) || null;
+    }
+
+    const hitX = hitEnemy ? hitEnemy.x : p.targetX;
+    const hitY = hitEnemy ? hitEnemy.y : p.targetY;
+
+    // Trigger dedicated elemental impact visual effect
+    this.createElementalImpact(p.element, hitX, hitY, color);
 
     if (p.aoeRadius > 0) {
-      // AOE explosion
-      this.createExplosionParticles(p.targetX, p.targetY, color, 18);
+      // AOE explosion (Fire, Lava, Dragon)
       this.activeEnemies.forEach(e => {
         if (e.hp <= 0) return;
-        const dist = Math.hypot(e.x - p.targetX, e.y - p.targetY);
+        const dist = Math.hypot(e.x - hitX, e.y - hitY);
         if (dist <= p.aoeRadius + e.size) {
           const effectiveDef = p.element === 'metal' ? Math.floor(e.defense * 0.5) : e.defense;
           const isWeak = e.config.elementWeakness === p.element;
           const dmgMult = isWeak ? 1.4 : 1.0;
           const dmg = Math.max(1, Math.round((p.damage - effectiveDef) * dmgMult));
           e.hp -= dmg;
+          if (guardian) guardian.damageDealt += dmg;
 
           if (p.element === 'fire' || p.element === 'lava') {
             e.burnTimer = 3.5;
@@ -1077,43 +1403,181 @@ export class GameEngine {
           }
         }
       });
-    } else {
-      // Direct single-target hit: reliably detect living target even if in fast motion
-      let hitEnemy = (directTarget && directTarget.hp > 0) ? directTarget : null;
+    } else if (hitEnemy) {
+      // Direct single-target hit: calculate defense reduction, status effects & weakness
+      const effectiveDef = p.element === 'metal' 
+        ? Math.floor(hitEnemy.defense * 0.5) 
+        : p.element === 'crystal' 
+          ? Math.max(0, hitEnemy.defense - 2) 
+          : hitEnemy.defense;
 
-      if (!hitEnemy) {
-        // Find nearest living enemy within generous collision radius
-        hitEnemy = this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) <= (e.size + 24)) || null;
+      if (p.element === 'crystal') {
+        hitEnemy.defense = Math.max(0, hitEnemy.defense - 1);
       }
 
-      // If still not matched, check near target location
-      if (!hitEnemy) {
-        hitEnemy = this.activeEnemies.find(e => e.hp > 0 && Math.hypot(e.x - p.targetX, e.y - p.targetY) <= (e.size + 30)) || null;
+      const isWeak = hitEnemy.config.elementWeakness === p.element;
+      const dmgMult = isWeak ? 1.4 : 1.0;
+      const dmg = Math.max(1, Math.round((p.damage - effectiveDef) * dmgMult));
+      hitEnemy.hp -= dmg;
+      if (guardian) guardian.damageDealt += dmg;
+
+      // Elemental status effects
+      if (p.element === 'ice') {
+        hitEnemy.slowFactor = 0.50;
+        hitEnemy.slowTimer = 3.0;
+      } else if (p.element === 'sand') {
+        hitEnemy.slowFactor = 0.65;
+        hitEnemy.slowTimer = 2.5;
+      } else if (p.element === 'vortex') {
+        hitEnemy.pathProgress = Math.max(0, hitEnemy.pathProgress - 0.04);
+        // Minor pull for nearby enemies
+        this.activeEnemies.forEach(e => {
+          if (e.hp > 0 && e.id !== hitEnemy!.id && Math.hypot(e.x - hitEnemy!.x, e.y - hitEnemy!.y) <= 70) {
+            e.pathProgress = Math.max(0, e.pathProgress - 0.025);
+            const splashDmg = Math.max(1, Math.round(dmg * 0.4));
+            e.hp -= splashDmg;
+            if (guardian) guardian.damageDealt += splashDmg;
+          }
+        });
       }
 
-      if (hitEnemy) {
-        const effectiveDef = p.element === 'metal' ? Math.floor(hitEnemy.defense * 0.5) : hitEnemy.defense;
-        const isWeak = hitEnemy.config.elementWeakness === p.element;
-        const dmgMult = isWeak ? 1.4 : 1.0;
-        const dmg = Math.max(1, Math.round((p.damage - effectiveDef) * dmgMult));
-        hitEnemy.hp -= dmg;
+      this.addFloatingText(`${dmg}`, hitEnemy.x, hitEnemy.y - 10, color, 14);
+      if (isWeak) {
+        this.addFloatingText('WEAKNESS!', hitEnemy.x, hitEnemy.y - 25, '#fbbf24', 11, true);
+      }
 
-        if (p.element === 'ice') {
-          hitEnemy.slowFactor = 0.50;
-          hitEnemy.slowTimer = 3.0;
-        } else if (p.element === 'sand') {
-          hitEnemy.slowFactor = 0.65;
-          hitEnemy.slowTimer = 2.5;
+      if (hitEnemy.config.isBoss) {
+        this.callbacks.onBossStateChange({ ...hitEnemy });
+      }
+
+      // Identify attacker configuration and upgrade level
+      const guardianLevel = guardian?.level ?? p.guardianLevel ?? 1;
+      const guardianConfigId = guardian?.configId ?? p.guardianConfigId ?? '';
+      const isMaxUpgrade = guardianLevel >= 10;
+
+      // Thunder Immortal Tower — Maximum Upgrade (Level 10 Sovereign)
+      // When Thunder Immortal attacks at max upgrade, the primary hit strikes the targeted monster,
+      // and the lightning chains to additional nearby monsters with connected electric arcs and damage.
+      // Strictly preserved: do NOT add chain effect to lower upgrade levels.
+      if (guardianConfigId === 'thunder_immortal' && isMaxUpgrade) {
+        soundEngine.playLightning();
+        let prevTarget = hitEnemy;
+        const hitList = [hitEnemy];
+        const chainRadius = 150;
+
+        // Chain between up to 4 additional nearby enemies
+        for (let c = 0; c < 4; c++) {
+          const candidates = this.activeEnemies.filter(e =>
+            e.hp > 0 &&
+            !hitList.includes(e) &&
+            (Math.hypot(e.x - prevTarget.x, e.y - prevTarget.y) <= chainRadius ||
+             Math.hypot(e.x - hitEnemy.x, e.y - hitEnemy.y) <= chainRadius)
+          ).sort((a, b) =>
+            Math.hypot(a.x - prevTarget.x, a.y - prevTarget.y) - Math.hypot(b.x - prevTarget.x, b.y - prevTarget.y)
+          );
+
+          const nextTarget = candidates[0];
+          if (nextTarget) {
+            hitList.push(nextTarget);
+
+            // Connect with visible crackling chain lightning arc
+            this.addVisualBeam({
+              id: `chain_${Math.random()}`,
+              startX: prevTarget.x,
+              startY: prevTarget.y,
+              targetX: nextTarget.x,
+              targetY: nextTarget.y,
+              color: '#c084fc',
+              secondaryColor: '#f472b6',
+              duration: 0.18,
+              elapsed: 0,
+              type: 'chain_lightning'
+            });
+
+            // Impact electric spark burst on chained enemy
+            this.createElementalImpact('lightning', nextTarget.x, nextTarget.y, '#e879f9');
+
+            const chainWeak = nextTarget.config.elementWeakness === 'lightning';
+            const chainDmgMult = chainWeak ? 1.4 : 1.0;
+            const chainDmg = Math.max(1, Math.round((p.damage * 0.8 - nextTarget.defense) * chainDmgMult));
+            nextTarget.hp -= chainDmg;
+            if (guardian) guardian.damageDealt += chainDmg;
+
+            this.addFloatingText(`${chainDmg}`, nextTarget.x, nextTarget.y - 10, '#c084fc', 13);
+            if (chainWeak) {
+              this.addFloatingText('WEAKNESS!', nextTarget.x, nextTarget.y - 25, '#fbbf24', 11, true);
+            }
+            if (nextTarget.config.isBoss) {
+              this.callbacks.onBossStateChange({ ...nextTarget });
+            }
+            prevTarget = nextTarget;
+          }
         }
+      }
 
-        this.createLotusBurst(hitEnemy.x, hitEnemy.y, color, 8);
-        this.addFloatingText(`${dmg}`, hitEnemy.x, hitEnemy.y - 10, color, 14);
-        if (isWeak) {
-          this.addFloatingText('WEAKNESS!', hitEnemy.x, hitEnemy.y - 25, '#fbbf24', 11, true);
-        }
+      // Frozen Empress Tower — Maximum Upgrade (Level 10 Sovereign)
+      // When Frozen Empress attacks at max upgrade, the primary hit strikes the targeted monster,
+      // and the attack spreads to additional nearby monsters with connected crystalline frost beams,
+      // permafrost slow chill, and frost damage.
+      // Strictly preserved: do NOT add spread effect to lower upgrade levels.
+      if (guardianConfigId === 'frost_empress' && isMaxUpgrade) {
+        soundEngine.playIceShatter();
+        let prevFrostTarget = hitEnemy;
+        const frostHitList = [hitEnemy];
+        const spreadRadius = 150;
 
-        if (hitEnemy.config.isBoss) {
-          this.callbacks.onBossStateChange({ ...hitEnemy });
+        // Spread to up to 4 additional nearby enemies
+        for (let c = 0; c < 4; c++) {
+          const candidates = this.activeEnemies.filter(e =>
+            e.hp > 0 &&
+            !frostHitList.includes(e) &&
+            (Math.hypot(e.x - prevFrostTarget.x, e.y - prevFrostTarget.y) <= spreadRadius ||
+             Math.hypot(e.x - hitEnemy.x, e.y - hitEnemy.y) <= spreadRadius)
+          ).sort((a, b) =>
+            Math.hypot(a.x - prevFrostTarget.x, a.y - prevFrostTarget.y) - Math.hypot(b.x - prevFrostTarget.x, b.y - prevFrostTarget.y)
+          );
+
+          const nextFrostTarget = candidates[0];
+          if (nextFrostTarget) {
+            frostHitList.push(nextFrostTarget);
+
+            // Connect with visible crystal frost chain beam
+            this.addVisualBeam({
+              id: `frost_chain_${Math.random()}`,
+              startX: prevFrostTarget.x,
+              startY: prevFrostTarget.y,
+              targetX: nextFrostTarget.x,
+              targetY: nextFrostTarget.y,
+              color: '#06b6d4',
+              secondaryColor: '#e0f2fe',
+              duration: 0.22,
+              elapsed: 0,
+              type: 'frost_chain'
+            });
+
+            // Impact visual effect: ice frost shatter
+            this.createElementalImpact('ice', nextFrostTarget.x, nextFrostTarget.y, '#38bdf8');
+
+            // Apply slowing permafrost chill
+            nextFrostTarget.slowFactor = 0.45;
+            nextFrostTarget.slowTimer = 3.2;
+
+            // Secondary spread damage (85% of base hit)
+            const chainWeak = nextFrostTarget.config.elementWeakness === 'ice';
+            const chainDmgMult = chainWeak ? 1.4 : 1.0;
+            const chainDmg = Math.max(1, Math.round((p.damage * 0.85 - nextFrostTarget.defense) * chainDmgMult));
+            nextFrostTarget.hp -= chainDmg;
+            if (guardian) guardian.damageDealt += chainDmg;
+
+            this.addFloatingText(`${chainDmg}`, nextFrostTarget.x, nextFrostTarget.y - 10, '#38bdf8', 13);
+            if (chainWeak) {
+              this.addFloatingText('WEAKNESS!', nextFrostTarget.x, nextFrostTarget.y - 25, '#fbbf24', 11, true);
+            }
+            if (nextFrostTarget.config.isBoss) {
+              this.callbacks.onBossStateChange({ ...nextFrostTarget });
+            }
+            prevFrostTarget = nextFrostTarget;
+          }
         }
       }
     }
@@ -1238,6 +1702,17 @@ export class GameEngine {
     const width = this.canvas.width;
     const height = this.canvas.height;
 
+    // Keep internal canvas resolution strictly synced with display container
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const targetW = Math.floor(rect.width * dpr);
+      const targetH = Math.floor(rect.height * dpr);
+      if (Math.abs(width - targetW) > 2 || Math.abs(height - targetH) > 2) {
+        this.handleResize();
+      }
+    }
+
     ctx.save();
     ctx.clearRect(0, 0, width, height);
 
@@ -1270,10 +1745,13 @@ export class GameEngine {
     // 6. Draw Enemies
     this.renderEnemies(ctx);
 
-    // 7. Draw Projectiles
+    // 7. Draw Visual Attack Beams (Lightning arcs, lasers, dragon breath)
+    this.renderVisualAttackBeams(ctx);
+
+    // 8. Draw Projectiles
     this.renderProjectiles(ctx);
 
-    // 8. Draw Visual Particles
+    // 9. Draw Visual Particles
     this.renderParticles(ctx);
 
     // 9. Draw Floating Numbers & Notifications
@@ -1281,9 +1759,11 @@ export class GameEngine {
       this.renderFloatingTexts(ctx);
     }
 
-    // 10. Draw Dragging Guardian Preview
+    // 10. Draw Dragging Guardian Preview or Selected Node Preview
     if (this.isDragging && this.draggingGuardianConfig) {
       this.renderDraggingGuardian(ctx);
+    } else if (this.selectedNode && this.selectedConfigToPlace && !this.selectedNode.placedGuardianInstanceId) {
+      this.renderSelectedNodePreview(ctx);
     }
 
     ctx.restore();
@@ -1392,6 +1872,8 @@ export class GameEngine {
 
   private renderPlacementNodes(ctx: CanvasRenderingContext2D) {
     const time = performance.now() * 0.002;
+    const selectedToPlace = this.selectedConfigToPlace;
+
     this.placementNodes.forEach(node => {
       const isSelected = this.selectedNode?.id === node.id;
       const isOccupied = !!node.placedGuardianInstanceId;
@@ -1400,9 +1882,13 @@ export class GameEngine {
       ctx.translate(node.x, node.y);
 
       // Stone Pedestal
-      ctx.fillStyle = isOccupied ? 'rgba(30, 41, 59, 0.9)' : 'rgba(15, 23, 42, 0.75)';
-      ctx.strokeStyle = isSelected ? '#fbbf24' : isOccupied ? '#38bdf8' : 'rgba(255, 255, 255, 0.25)';
-      ctx.lineWidth = isSelected ? 2.5 : 1.5;
+      ctx.fillStyle = isOccupied ? 'rgba(30, 41, 59, 0.9)' : (selectedToPlace && !isOccupied ? 'rgba(30, 27, 20, 0.85)' : 'rgba(15, 23, 42, 0.75)');
+      ctx.strokeStyle = isSelected 
+        ? '#fbbf24' 
+        : isOccupied 
+        ? '#38bdf8' 
+        : (selectedToPlace && !isOccupied ? (selectedToPlace.color || '#f59e0b') : 'rgba(255, 255, 255, 0.25)');
+      ctx.lineWidth = isSelected ? 2.5 : (selectedToPlace && !isOccupied ? 2.0 : 1.5);
 
       // Octagonal Bagua Pedestal
       ctx.beginPath();
@@ -1420,22 +1906,60 @@ export class GameEngine {
 
       // Empty Node Symbol
       if (!isOccupied) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillStyle = selectedToPlace ? '#fbbf24' : 'rgba(255, 255, 255, 0.4)';
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('☯', 0, 0);
 
-        // Gentle breathing pulse if not occupied
-        const pulse = Math.sin(time + node.x) * 3;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.beginPath();
-        ctx.arc(0, 0, r + 4 + pulse, 0, Math.PI * 2);
-        ctx.stroke();
+        if (selectedToPlace) {
+          // Prominent pulsating beacon ring indicating valid placement target on touch devices
+          const pulse = Math.sin(time * 3 + node.x * 0.05) * 4;
+          ctx.strokeStyle = selectedToPlace.color || '#f59e0b';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 6 + pulse, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          // Gentle breathing pulse if not occupied
+          const pulse = Math.sin(time + node.x) * 3;
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 4 + pulse, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
 
       ctx.restore();
     });
+  }
+
+  private renderSelectedNodePreview(ctx: CanvasRenderingContext2D) {
+    if (!this.selectedNode || !this.selectedConfigToPlace) return;
+    const config = this.selectedConfigToPlace;
+
+    ctx.save();
+    ctx.translate(this.selectedNode.x, this.selectedNode.y);
+
+    // Range preview dashed circle
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, config.baseRange, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = config.color;
+    ctx.globalAlpha = 0.12;
+    ctx.fill();
+
+    // Ghost Cultivator avatar
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = config.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 
   private renderRealmCore(ctx: CanvasRenderingContext2D) {
@@ -1915,6 +2439,169 @@ export class GameEngine {
     });
   }
 
+  private renderVisualAttackBeams(ctx: CanvasRenderingContext2D) {
+    if (this.visualAttackBeams.length === 0) return;
+
+    this.visualAttackBeams.forEach(b => {
+      const alpha = Math.max(0, 1 - (b.elapsed / b.duration));
+      if (alpha <= 0) return;
+
+      ctx.save();
+
+      if (b.type === 'lightning' || b.type === 'chain_lightning') {
+        // Multi-segment jagged crackling lightning bolt
+        const dx = b.targetX - b.startX;
+        const dy = b.targetY - b.startY;
+        const dist = Math.hypot(dx, dy);
+        const segments = Math.max(5, Math.floor(dist / 22));
+        const nx = -dy / dist;
+        const ny = dx / dist;
+
+        const points: { x: number; y: number }[] = [{ x: b.startX, y: b.startY }];
+        for (let i = 1; i < segments; i++) {
+          const t = i / segments;
+          // Seeded zig-zag offset that flickers
+          const seed = (Math.sin(i * 99 + b.elapsed * 50) + Math.cos(i * 33)) * 0.5;
+          const jitter = seed * (b.type === 'chain_lightning' ? 12 : 16);
+          points.push({
+            x: b.startX + dx * t + nx * jitter,
+            y: b.startY + dy * t + ny * jitter
+          });
+        }
+        points.push({ x: b.targetX, y: b.targetY });
+
+        // Outer electric purple/pink glow
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = b.type === 'chain_lightning' ? 4 : 5.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+
+        // Inner high-voltage white core
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.8;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+
+        // Lightning impact spark star at target
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(b.targetX, b.targetY, 4 * alpha, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (b.type === 'laser') {
+        // High-intensity prismatic laser beam
+        ctx.lineCap = 'round';
+        // Outer beam
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 4.5;
+        ctx.globalAlpha = alpha * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(b.startX, b.startY);
+        ctx.lineTo(b.targetX, b.targetY);
+        ctx.stroke();
+
+        // Inner white beam
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.8;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.moveTo(b.startX, b.startY);
+        ctx.lineTo(b.targetX, b.targetY);
+        ctx.stroke();
+      } else if (b.type === 'dragon_breath') {
+        // Azure celestial dragon breath stream
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 6;
+        ctx.globalAlpha = alpha * 0.65;
+        ctx.beginPath();
+        ctx.moveTo(b.startX, b.startY);
+        ctx.lineTo(b.targetX, b.targetY);
+        ctx.stroke();
+
+        ctx.strokeStyle = b.secondaryColor || b.color;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = alpha * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(b.startX, b.startY);
+        ctx.lineTo(b.targetX, b.targetY);
+        ctx.stroke();
+      } else if (b.type === 'frost_chain') {
+        // Crystalline Glacial Frost Chain with Ice Diamonds & Shimmering Frost Arc
+        const dx = b.targetX - b.startX;
+        const dy = b.targetY - b.startY;
+        const dist = Math.hypot(dx, dy);
+        const segments = Math.max(4, Math.floor(dist / 24));
+        const nx = -dy / dist;
+        const ny = dx / dist;
+
+        const points: { x: number; y: number }[] = [{ x: b.startX, y: b.startY }];
+        for (let i = 1; i < segments; i++) {
+          const t = i / segments;
+          // Crystalline angular offset that resembles jagged ice fractures
+          const angleOffset = Math.sin(i * 1.57 + b.elapsed * 20) * 8;
+          points.push({
+            x: b.startX + dx * t + nx * angleOffset,
+            y: b.startY + dy * t + ny * angleOffset
+          });
+        }
+        points.push({ x: b.targetX, y: b.targetY });
+
+        // Outer frost glow (cyan/azure)
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 4.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'miter';
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+
+        // Inner icy white crystalline core
+        ctx.strokeStyle = b.secondaryColor || '#f0fdfa';
+        ctx.lineWidth = 2.0;
+        ctx.globalAlpha = alpha * 0.95;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+
+        // Crystalline diamond nodes along the chain
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < points.length; i++) {
+          const pt = points[i];
+          const nodeSize = (i === 0 || i === points.length - 1) ? 5 : 3.5;
+          ctx.globalAlpha = alpha * 0.9;
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y - nodeSize);
+          ctx.lineTo(pt.x + nodeSize, pt.y);
+          ctx.lineTo(pt.x, pt.y + nodeSize);
+          ctx.lineTo(pt.x - nodeSize, pt.y);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    });
+  }
+
   private renderProjectiles(ctx: CanvasRenderingContext2D) {
     this.projectiles.forEach(p => {
       ctx.save();
@@ -1926,62 +2613,209 @@ export class GameEngine {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1;
 
-      if (p.element === 'fire' || p.element === 'dragon') {
-        // Crescent Sword Qi Slash
+      if (p.element === 'lightning') {
+        // Nine Heavens Tribulation Lightning Spear Bolt
+        ctx.fillStyle = '#c084fc';
         ctx.beginPath();
-        ctx.arc(0, 0, 10 * p.scale, -Math.PI * 0.4, Math.PI * 0.4);
+        ctx.moveTo(14 * p.scale, 0);
+        ctx.lineTo(4 * p.scale, -4 * p.scale);
+        ctx.lineTo(6 * p.scale, -1.5 * p.scale);
+        ctx.lineTo(-8 * p.scale, -5 * p.scale);
+        ctx.lineTo(-5 * p.scale, 0);
+        ctx.lineTo(-8 * p.scale, 5 * p.scale);
+        ctx.lineTo(6 * p.scale, 1.5 * p.scale);
+        ctx.lineTo(4 * p.scale, 4 * p.scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#f472b6';
+        ctx.stroke();
+
+        // White electric core
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(-4 * p.scale, 0);
+        ctx.lineTo(12 * p.scale, 0);
+        ctx.stroke();
+      } else if (p.element === 'fire') {
+        // Crescent Flaming Sword Qi Slash
+        ctx.beginPath();
+        ctx.arc(0, 0, 11 * p.scale, -Math.PI * 0.45, Math.PI * 0.45);
         ctx.lineTo(0, 0);
         ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = '#fef08a';
         ctx.stroke();
-      } else if (p.element === 'lava') {
-        // Molten magma orb with glowing core
+
+        // Fiery inner core
+        ctx.fillStyle = '#facc15';
         ctx.beginPath();
-        ctx.arc(0, 0, 8 * p.scale, 0, Math.PI * 2);
+        ctx.arc(1 * p.scale, 0, 6 * p.scale, -Math.PI * 0.4, Math.PI * 0.4);
+        ctx.lineTo(1 * p.scale, 0);
+        ctx.closePath();
         ctx.fill();
+      } else if (p.element === 'dragon') {
+        // Azure Dragon Qi Crescent Blade
+        ctx.beginPath();
+        ctx.arc(0, 0, 12 * p.scale, -Math.PI * 0.45, Math.PI * 0.45);
+        ctx.lineTo(0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.stroke();
+
+        // Azure dragon eye glint
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(4 * p.scale, 0, 2.5 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.element === 'lava') {
+        // Molten magma boulder with glowing core
+        ctx.beginPath();
+        ctx.arc(0, 0, 8.5 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ea580c';
+        ctx.stroke();
         ctx.fillStyle = '#fef08a';
         ctx.beginPath();
-        ctx.arc(0, 0, 4 * p.scale, 0, Math.PI * 2);
+        ctx.arc(0, 0, 4.5 * p.scale, 0, Math.PI * 2);
         ctx.fill();
       } else if (p.element === 'metal') {
-        // Flying Spirit Dagger / Sword
+        // Flying Spirit Broadsword
         ctx.beginPath();
-        ctx.moveTo(12 * p.scale, 0);
-        ctx.lineTo(-6 * p.scale, -3 * p.scale);
-        ctx.lineTo(-4 * p.scale, 0);
-        ctx.lineTo(-6 * p.scale, 3 * p.scale);
+        ctx.moveTo(13 * p.scale, 0);
+        ctx.lineTo(-4 * p.scale, -3.5 * p.scale);
+        ctx.lineTo(-7 * p.scale, -5 * p.scale);
+        ctx.lineTo(-6 * p.scale, 0);
+        ctx.lineTo(-7 * p.scale, 5 * p.scale);
+        ctx.lineTo(-4 * p.scale, 3.5 * p.scale);
         ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = '#fef08a';
+        ctx.stroke();
+
+        // Sword blade fuller line
+        ctx.strokeStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(-3 * p.scale, 0);
+        ctx.lineTo(10 * p.scale, 0);
         ctx.stroke();
       } else if (p.element === 'ice') {
-        // Crystalline icicle
+        // Crystalline Glacial Icicle Lance
         ctx.beginPath();
-        ctx.moveTo(11 * p.scale, 0);
-        ctx.lineTo(-5 * p.scale, -4 * p.scale);
+        ctx.moveTo(12 * p.scale, 0);
+        ctx.lineTo(-4 * p.scale, -4.5 * p.scale);
         ctx.lineTo(-8 * p.scale, 0);
-        ctx.lineTo(-5 * p.scale, 4 * p.scale);
+        ctx.lineTo(-4 * p.scale, 4.5 * p.scale);
         ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = '#e0f2fe';
+        ctx.stroke();
+
+        // Ice crystal spine
+        ctx.strokeStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(-6 * p.scale, 0);
+        ctx.lineTo(10 * p.scale, 0);
+        ctx.stroke();
+      } else if (p.element === 'wind') {
+        // Emerald Jade Wind Crescent Blade
+        ctx.beginPath();
+        ctx.arc(0, 0, 10 * p.scale, -Math.PI * 0.5, Math.PI * 0.5);
+        ctx.lineTo(-2 * p.scale, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#a7f3d0';
         ctx.stroke();
       } else if (p.element === 'sand') {
-        // Swirling sand bead
+        // Swirling Ancient Sand Bead
         ctx.beginPath();
-        ctx.arc(0, 0, 6 * p.scale, 0, Math.PI * 2);
+        ctx.arc(0, 0, 6.5 * p.scale, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#d97706';
         ctx.stroke();
-      } else if (p.element === 'crystal') {
-        // Prismatic diamond facet
+
+        // Swirling sand orbit arc
+        ctx.strokeStyle = '#fde68a';
         ctx.beginPath();
-        ctx.moveTo(8 * p.scale, 0);
-        ctx.lineTo(0, -5 * p.scale);
-        ctx.lineTo(-8 * p.scale, 0);
-        ctx.lineTo(0, 5 * p.scale);
+        ctx.arc(0, 0, 9 * p.scale, 0, Math.PI * 1.2);
+        ctx.stroke();
+      } else if (p.element === 'crystal') {
+        // Prismatic Diamond Facet Gem
+        ctx.beginPath();
+        ctx.moveTo(9 * p.scale, 0);
+        ctx.lineTo(0, -6 * p.scale);
+        ctx.lineTo(-9 * p.scale, 0);
+        ctx.lineTo(0, 6 * p.scale);
         ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = '#ffffff';
         ctx.stroke();
+
+        // Diamond facets
+        ctx.beginPath();
+        ctx.moveTo(-9 * p.scale, 0);
+        ctx.lineTo(9 * p.scale, 0);
+        ctx.moveTo(0, -6 * p.scale);
+        ctx.lineTo(0, 6 * p.scale);
+        ctx.stroke();
+      } else if (p.element === 'vortex') {
+        // Spatial Singularity Vortex Orb
+        ctx.beginPath();
+        ctx.arc(0, 0, 6.5 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#c084fc';
+        ctx.stroke();
+
+        // Gravitational ring
+        ctx.strokeStyle = '#a855f7';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 10 * p.scale, 4 * p.scale, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (p.element === 'celestial') {
+        // Radiant Starlight Comet Arrow
+        ctx.beginPath();
+        ctx.moveTo(13 * p.scale, 0);
+        ctx.lineTo(2 * p.scale, -4 * p.scale);
+        ctx.lineTo(-7 * p.scale, -2 * p.scale);
+        ctx.lineTo(-4 * p.scale, 0);
+        ctx.lineTo(-7 * p.scale, 2 * p.scale);
+        ctx.lineTo(2 * p.scale, 4 * p.scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#fef08a';
+        ctx.stroke();
+
+        // Starlight core
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(3 * p.scale, 0, 2.5 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.element === 'shadow') {
+        // Nether Shadow Dagger
+        ctx.beginPath();
+        ctx.moveTo(12 * p.scale, 0);
+        ctx.lineTo(-4 * p.scale, -4 * p.scale);
+        ctx.lineTo(-2 * p.scale, 0);
+        ctx.lineTo(-4 * p.scale, 4 * p.scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#c084fc';
+        ctx.stroke();
+      } else if (p.element === 'life') {
+        // Emerald Spiritual Lotus Seed
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 8 * p.scale, 5 * p.scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#bbf7d0';
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(2 * p.scale, 0, 2 * p.scale, 0, Math.PI * 2);
+        ctx.fill();
       } else {
-        // Energy arrow / dart
+        // Generic Spiritual Energy Dart
         ctx.beginPath();
         ctx.moveTo(10 * p.scale, 0);
         ctx.lineTo(-6 * p.scale, -4 * p.scale);
@@ -2078,7 +2912,7 @@ export class GameEngine {
     window.addEventListener('mouseup', this.handleMouseUp);
     this.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
 
-    // Touch events for responsive mobile
+    // Touch events for responsive mobile and tablet placement
     this.canvas.addEventListener('touchstart', this.handleTouchStart, { passive: false });
     window.addEventListener('touchmove', this.handleTouchMove, { passive: false });
     window.addEventListener('touchend', this.handleTouchEnd, { passive: false });
@@ -2098,20 +2932,26 @@ export class GameEngine {
     window.removeEventListener('touchend', this.handleTouchEnd);
 
     window.removeEventListener('resize', this.handleResize);
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
   }
 
   public handleResize = () => {
     const parent = this.canvas.parentElement;
-    const w = parent ? parent.clientWidth : window.innerWidth;
-    const h = (parent && parent.clientHeight) ? parent.clientHeight : 550;
-    if (w <= 0) return;
+    const rect = parent ? parent.getBoundingClientRect() : this.canvas.getBoundingClientRect();
+    const w = Math.floor(rect.width || window.innerWidth);
+    const h = Math.floor(rect.height || (window.innerHeight - 150));
+    if (w <= 0 || h <= 0) return;
 
     // Set canvas internal resolution to crisp high DPI, capped at 2 to avoid memory bloat
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    this.canvas.style.width = '100%';
+    this.canvas.style.height = '100%';
 
     // Scale virtual coords into display space
     const scaleX = (w * dpr) / this.VIRTUAL_WIDTH;
@@ -2121,9 +2961,11 @@ export class GameEngine {
     this.offsetY = ((h * dpr) - (this.VIRTUAL_HEIGHT * this.scale)) / 2;
   };
 
-  private screenToVirtual(clientX: number, clientY: number): { x: number; y: number } {
+  public screenToVirtual(clientX: number, clientY: number): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    if (!rect.width || !rect.height) return { x: 0, y: 0 };
+    // Mathematically exact CSS client to canvas buffer pixel conversion
+    const dpr = this.canvas.width / rect.width;
     const canvasX = (clientX - rect.left) * dpr;
     const canvasY = (clientY - rect.top) * dpr;
 
@@ -2133,22 +2975,145 @@ export class GameEngine {
     };
   }
 
+  public findNearestPlacementNode(vx: number, vy: number, maxDist: number = 85): PlacementNode | null {
+    let bestNode: PlacementNode | null = null;
+    let minDist = maxDist;
+
+    for (const node of this.placementNodes) {
+      const dist = Math.hypot(node.x - vx, node.y - vy);
+      if (dist < minDist) {
+        minDist = dist;
+        bestNode = node;
+      }
+    }
+    return bestNode;
+  }
+
+  /**
+   * High-forgiveness Touch-Buffer Zone for mobile & tablet screens.
+   * Compares both physical CSS screen-space distance (>=56px touch target)
+   * and virtual Euclidean distance without affecting the visual layout.
+   */
+  public findNearestPlacementNodeWithBuffer(
+    clientX: number,
+    clientY: number,
+    vx: number,
+    vy: number,
+    maxVirtualDist: number = 130
+  ): PlacementNode | null {
+    let bestNode: PlacementNode | null = null;
+    let minDist = maxVirtualDist;
+
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = (rect.width > 0) ? (this.canvas.width / rect.width) : 1;
+
+    for (const node of this.placementNodes) {
+      // 1. Virtual Euclidean distance
+      const vDist = Math.hypot(node.x - vx, node.y - vy);
+
+      // 2. Exact physical screen distance in CSS pixels
+      const nodeScreenX = rect.left + ((node.x * this.scale + this.offsetX) / dpr);
+      const nodeScreenY = rect.top + ((node.y * this.scale + this.offsetY) / dpr);
+      const screenDist = Math.hypot(clientX - nodeScreenX, clientY - nodeScreenY);
+
+      // Generous touch buffer: within 56 CSS pixels or within virtual radius
+      const isWithinScreenBuffer = screenDist <= 56;
+      const isWithinVirtualBuffer = vDist <= maxVirtualDist;
+
+      if (isWithinScreenBuffer || isWithinVirtualBuffer) {
+        // Combined scoring to pick the closest intended pedestal
+        const score = Math.min(vDist, screenDist * (this.VIRTUAL_WIDTH / Math.max(1, rect.width)));
+        if (score < minDist) {
+          minDist = score;
+          bestNode = node;
+        }
+      }
+    }
+    return bestNode;
+  }
+
+  public handleCanvasTap(clientX: number, clientY: number, isTouch: boolean = false) {
+    const vPos = this.screenToVirtual(clientX, clientY);
+    // Touch buffer: expanded hit detection area (up to 135 virtual px or 56 CSS screen px)
+    const touchBufferDist = isTouch ? 135 : 95;
+    const nearestNode = this.findNearestPlacementNodeWithBuffer(clientX, clientY, vPos.x, vPos.y, touchBufferDist);
+
+    if (this.selectedConfigToPlace) {
+      // User tapped a tower option first, now tapping battlefield
+      if (nearestNode) {
+        if (!nearestNode.placedGuardianInstanceId) {
+          // Empty pedestal -> place the selected tower!
+          const success = this.placeGuardian(this.selectedConfigToPlace.id, nearestNode);
+          if (success) {
+            this.selectedConfigToPlace = null;
+            if (this.callbacks.onSelectedConfigChange) {
+              this.callbacks.onSelectedConfigChange(null);
+            }
+            return;
+          }
+          return;
+        } else {
+          // Tapped an existing guardian -> inspect that guardian instead
+          const placed = this.placedGuardians.get(nearestNode.placedGuardianInstanceId) || null;
+          this.selectedNode = nearestNode;
+          this.selectedConfigToPlace = null;
+          if (this.callbacks.onSelectedConfigChange) {
+            this.callbacks.onSelectedConfigChange(null);
+          }
+          this.callbacks.onSelectedGuardianChange(placed ? { ...placed } : null, nearestNode);
+          soundEngine.playPlacement();
+          return;
+        }
+      } else {
+        // Tapped far away from any pedestal - cancel placement safely so player is not locked
+        this.selectedConfigToPlace = null;
+        if (this.callbacks.onSelectedConfigChange) {
+          this.callbacks.onSelectedConfigChange(null);
+        }
+        this.addFloatingText('Placement cancelled', vPos.x, vPos.y - 15, '#94a3b8', 13);
+        return;
+      }
+    }
+
+    // No tower was pre-selected -> inspect or select pedestal
+    if (nearestNode) {
+      this.selectedNode = nearestNode;
+      const placed = nearestNode.placedGuardianInstanceId 
+        ? this.placedGuardians.get(nearestNode.placedGuardianInstanceId) || null 
+        : null;
+      this.callbacks.onSelectedGuardianChange(placed ? { ...placed } : null, nearestNode);
+      soundEngine.playPlacement();
+    } else {
+      // Tapped outside any pedestal -> clear selection
+      this.selectedNode = null;
+      this.callbacks.onSelectedGuardianChange(null, null);
+    }
+  }
+
   private handleMouseDown = (e: MouseEvent) => {
-    const vPos = this.screenToVirtual(e.clientX, e.clientY);
-    this.checkNodeClick(vPos.x, vPos.y);
+    // Only handle mouse click if directly target is the canvas
+    if (e.target !== this.canvas) return;
+    // Ignore synthetic mouse events fired after touch
+    if (performance.now() - this.lastTouchTime < 600) {
+      return;
+    }
+    if (e.button !== 0) return; // Left click only
+    this.handleCanvasTap(e.clientX, e.clientY, false);
   };
 
   private handleMouseMove = (e: MouseEvent) => {
+    if (performance.now() - this.lastTouchTime < 600) return;
     if (this.isDragging) {
       this.dragScreenPos = { x: e.clientX, y: e.clientY };
     }
   };
 
   private handleMouseUp = (e: MouseEvent) => {
+    if (performance.now() - this.lastTouchTime < 600) return;
     if (this.isDragging && this.draggingGuardianConfig) {
       const vPos = this.screenToVirtual(e.clientX, e.clientY);
-      const nearestNode = this.findNearestEmptyNode(vPos.x, vPos.y, 45);
-      if (nearestNode) {
+      const nearestNode = this.findNearestPlacementNodeWithBuffer(e.clientX, e.clientY, vPos.x, vPos.y, 110);
+      if (nearestNode && !nearestNode.placedGuardianInstanceId) {
         this.placeGuardian(this.draggingGuardianConfig.id, nearestNode);
       }
       this.isDragging = false;
@@ -2157,30 +3122,84 @@ export class GameEngine {
   };
 
   private handleTouchStart = (e: TouchEvent) => {
+    // Strictly ensure touch started directly on the canvas, NOT on an HTML button, drawer, or HUD
+    if (e.target !== this.canvas) {
+      this.touchActiveOnCanvas = false;
+      return;
+    }
+
     if (e.touches.length === 1) {
       const touch = e.touches[0];
-      const vPos = this.screenToVirtual(touch.clientX, touch.clientY);
-      this.checkNodeClick(vPos.x, vPos.y);
+      this.touchActiveOnCanvas = true;
+      this.touchStartX = touch.clientX;
+      this.touchStartY = touch.clientY;
+      this.touchStartTime = performance.now();
+      this.touchMoved = false;
+      this.lastTouchTime = performance.now();
+      if (e.cancelable) {
+        e.preventDefault();
+      }
     }
   };
 
   private handleTouchMove = (e: TouchEvent) => {
-    if (this.isDragging && e.touches.length === 1) {
-      e.preventDefault();
+    if (!this.touchActiveOnCanvas) return;
+    if (e.touches.length === 1) {
       const touch = e.touches[0];
-      this.dragScreenPos = { x: touch.clientX, y: touch.clientY };
+      const dist = Math.hypot(touch.clientX - this.touchStartX, touch.clientY - this.touchStartY);
+      // Forgiving touch movement threshold (20px)
+      if (dist > 20) {
+        this.touchMoved = true;
+      }
+      if (this.isDragging) {
+        if (e.cancelable) e.preventDefault();
+        this.dragScreenPos = { x: touch.clientX, y: touch.clientY };
+      }
     }
   };
 
   private handleTouchEnd = (e: TouchEvent) => {
+    // CRITICAL: If touch did not originate on canvas (e.g. on Ascend/Delete/Exit/Drawer buttons),
+    // NEVER intercept, prevent default, or trigger a canvas tap! Let native button click fire!
+    if (!this.touchActiveOnCanvas) return;
+    this.touchActiveOnCanvas = false;
+    this.lastTouchTime = performance.now();
+
+    const endTouch = (e.changedTouches && e.changedTouches[0]) || null;
+    const clientX = endTouch ? endTouch.clientX : this.touchStartX;
+    const clientY = endTouch ? endTouch.clientY : this.touchStartY;
+
+    // Check if finger was released over an overlaid UI element (e.g. drawer, hud, button)
+    const elementUnderTouch = document.elementFromPoint(clientX, clientY);
+    if (elementUnderTouch && elementUnderTouch !== this.canvas) {
+      return;
+    }
+
+    if (e.cancelable) {
+      e.preventDefault();
+    }
+
     if (this.isDragging && this.draggingGuardianConfig) {
       const vPos = this.screenToVirtual(this.dragScreenPos.x, this.dragScreenPos.y);
-      const nearestNode = this.findNearestEmptyNode(vPos.x, vPos.y, 50);
-      if (nearestNode) {
+      const nearestNode = this.findNearestPlacementNodeWithBuffer(
+        this.dragScreenPos.x,
+        this.dragScreenPos.y,
+        vPos.x,
+        vPos.y,
+        135
+      );
+      if (nearestNode && !nearestNode.placedGuardianInstanceId) {
         this.placeGuardian(this.draggingGuardianConfig.id, nearestNode);
       }
       this.isDragging = false;
       this.draggingGuardianConfig = null;
+      return;
+    }
+
+    // Touch tap detection: if finger didn't drag far (>20px) and tap duration was < 800ms
+    const tapDuration = performance.now() - this.touchStartTime;
+    if (!this.touchMoved && tapDuration < 800) {
+      this.handleCanvasTap(clientX, clientY, true);
     }
   };
 
@@ -2199,45 +3218,9 @@ export class GameEngine {
     }
   };
 
-  private checkNodeClick(vx: number, vy: number) {
-    // Check if player clicked a placement node
-    for (const node of this.placementNodes) {
-      const dist = Math.hypot(node.x - vx, node.y - vy);
-      if (dist <= 30) {
-        this.selectedNode = node;
-        const placed = node.placedGuardianInstanceId 
-          ? this.placedGuardians.get(node.placedGuardianInstanceId) || null 
-          : null;
-        this.callbacks.onSelectedGuardianChange(placed, node);
-        soundEngine.playPlacement();
-        return;
-      }
-    }
-
-    // Deselect if clicked outside
-    this.selectedNode = null;
-    this.callbacks.onSelectedGuardianChange(null, null);
-  }
-
   public startDragGuardian(config: GuardianConfig, clientX: number, clientY: number) {
     this.draggingGuardianConfig = config;
     this.isDragging = true;
     this.dragScreenPos = { x: clientX, y: clientY };
-  }
-
-  private findNearestEmptyNode(vx: number, vy: number, maxDist: number): PlacementNode | null {
-    let bestNode: PlacementNode | null = null;
-    let minDist = maxDist;
-
-    this.placementNodes.forEach(node => {
-      if (node.placedGuardianInstanceId) return;
-      const dist = Math.hypot(node.x - vx, node.y - vy);
-      if (dist < minDist) {
-        minDist = dist;
-        bestNode = node;
-      }
-    });
-
-    return bestNode;
   }
 }

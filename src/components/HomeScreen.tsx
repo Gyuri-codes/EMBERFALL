@@ -80,6 +80,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       window.removeEventListener('pointermove', handlePointerMove);
       clearTimeout(idleTimer);
       cancelAnimationFrame(animId);
+      soundEngine.fadeOutMusic(0.15);
     };
   }, []);
 
@@ -172,8 +173,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {onToggleAudio && (
             <button
               id="home-audio-toggle"
-              onClick={onToggleAudio}
-              className="p-1.5 sm:p-2 rounded-md bg-neutral-950/75 hover:bg-neutral-900 border border-amber-900/40 hover:border-amber-400/60 text-neutral-300 hover:text-amber-300 transition-colors shadow-sm cursor-pointer"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleAudio();
+              }}
+              className="p-1.5 sm:p-2 rounded-md bg-neutral-950/75 hover:bg-neutral-900 border border-amber-900/40 hover:border-amber-400/60 text-neutral-300 hover:text-amber-300 transition-colors shadow-sm cursor-pointer active:scale-95"
               title={audioMuted ? "Unmute Music & SFX" : "Mute Music & SFX"}
               aria-label={audioMuted ? "Audio muted, click to unmute" : "Audio active, click to mute"}
             >
@@ -226,7 +231,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
 
         {/* Title & Branding Box (with soft dark background blur for pristine text legibility) */}
-        <div className="relative flex flex-col items-center mb-1 px-6 py-3 rounded-3xl bg-neutral-950/40 backdrop-blur-[2px]">
+        <div className="relative flex flex-col items-center mb-1 px-6 sm:px-8 py-3.5 sm:py-4 rounded-3xl bg-neutral-950/60 backdrop-blur-md border border-amber-500/20 shadow-[0_12px_36px_rgba(0,0,0,0.85)]">
           {/* Crimson Calligraphy Seal */}
           <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-red-700 via-amber-800 to-red-950 flex items-center justify-center border-2 border-amber-400/75 shadow-[0_0_20px_rgba(220,38,38,0.4)] mb-2 sm:mb-3 transform hover:scale-105 transition-transform duration-300">
             <span className="font-calligraphy text-2xl sm:text-3xl text-amber-200 font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">仙域</span>
